@@ -42,7 +42,7 @@ function mutationAllowed(request: NextRequest): boolean {
 async function callBackend(
   request: NextRequest,
   path: string[],
-  body: Buffer | undefined,
+  body: ArrayBuffer | undefined,
   accessToken: string | null,
 ): Promise<Response> {
   const config = getBdaServerConfig();
@@ -65,7 +65,7 @@ async function callBackend(
 }
 
 async function copyResponse(upstream: Response): Promise<NextResponse> {
-  const body = upstream.status === 204 ? null : Buffer.from(await upstream.arrayBuffer());
+  const body = upstream.status === 204 ? null : await upstream.arrayBuffer();
   const response = new NextResponse(body, { status: upstream.status });
   for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = upstream.headers.get(name);
@@ -84,9 +84,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
   if (!path.length) return NextResponse.json({ detail: "API path required" }, { status: 404 });
 
-  const body = BODY_METHODS.has(request.method)
-    ? Buffer.from(await request.arrayBuffer())
-    : undefined;
+  const body = BODY_METHODS.has(request.method) ? await request.arrayBuffer() : undefined;
   let accessToken = request.cookies.get(ACCESS_COOKIE)?.value ?? null;
   const refreshToken = request.cookies.get(REFRESH_COOKIE)?.value ?? null;
   let refreshed: TokenSet | null = null;
