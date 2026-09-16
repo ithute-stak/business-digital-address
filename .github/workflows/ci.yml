@@ -71,14 +71,22 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install --no-audit --no-fund
+      - name: Verify OIDC/BFF security contract
+        working-directory: frontend
+        run: npm run auth-contract
       - name: Typecheck frontend
         working-directory: frontend
         run: npm run typecheck
       - name: Build frontend
         working-directory: frontend
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:8100
-          NEXT_PUBLIC_AUTH_URL: https://auth.ithute.co.ls
+          NEXT_PUBLIC_API_URL: /api/bda
+          BDA_APP_URL: https://business.ls
+          BDA_API_INTERNAL_URL: http://backend:8100
+          BDA_ITHUTE_AUTH_URL: https://auth.ithute.co.ls
+          BDA_OIDC_CLIENT_ID: business-digital-address
+          BDA_RUNTIME_ENVIRONMENT: production
+          BDA_DEV_AUTH_BYPASS: "false"
         run: npm run build
       - name: Build frontend image
         run: docker build -t business-digital-address-web:ci frontend
@@ -97,3 +105,5 @@ jobs:
           grep -q "backend:" /tmp/business-digital-address-compose.yml
           grep -q "frontend:" /tmp/business-digital-address-compose.yml
           grep -q "db:" /tmp/business-digital-address-compose.yml
+          grep -q "BDA_DEV_AUTH_BYPASS: \"true\"" /tmp/business-digital-address-compose.yml
+          grep -q "BDA_API_INTERNAL_URL: http://backend:8100" /tmp/business-digital-address-compose.yml
