@@ -54,6 +54,8 @@ def upgrade() -> None:
         sa.Column("domain", sa.String(length=253), nullable=False),
         sa.Column("address", sa.String(length=320), nullable=False),
         sa.Column("mailbox_status", sa.String(length=32), nullable=False),
+        sa.Column("platform_binding_id", sa.String(length=64), nullable=True),
+        sa.Column("platform_mailbox_id", sa.String(length=64), nullable=True),
         sa.Column("friendly_alias", sa.String(length=320), nullable=True),
         sa.Column("provisioned_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -63,6 +65,8 @@ def upgrade() -> None:
         sa.UniqueConstraint("business_id"),
         sa.UniqueConstraint("friendly_alias"),
         sa.UniqueConstraint("local_part"),
+        sa.UniqueConstraint("platform_binding_id"),
+        sa.UniqueConstraint("platform_mailbox_id"),
     )
     op.create_index("ix_official_addresses_address", "official_addresses", ["address"], unique=True)
     op.create_index("ix_official_addresses_business_id", "official_addresses", ["business_id"], unique=True)
