@@ -6,8 +6,6 @@ const capabilities = [
 ];
 
 export default function HomePage() {
-  const authUrl = process.env.NEXT_PUBLIC_AUTH_URL ?? "https://auth.ithute.co.ls";
-
   return (
     <main>
       <header className="topbar">
@@ -18,9 +16,9 @@ export default function HomePage() {
             <small>Official communications platform</small>
           </span>
         </div>
-        <a className="signIn" href={`${authUrl.replace(/\/$/, "")}/account/login`}>
-          Sign in with Ithute Auth
-        </a>
+        <span className="signIn" title="Product OIDC redirect registration is completed when the production hostname is approved">
+          Ithute Auth foundation ready
+        </span>
       </header>
 
       <section className="hero">
