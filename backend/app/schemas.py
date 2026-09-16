@@ -35,6 +35,8 @@ class OfficialAddressResponse(BaseModel):
     local_part: str
     domain: str
     mailbox_status: str
+    platform_binding_id: str | None = None
+    platform_mailbox_id: str | None = None
     friendly_alias: str | None = None
 
     model_config = {"from_attributes": True}
@@ -68,6 +70,7 @@ class ExternalEmailResponse(BaseModel):
     status: str
     forward_official_mail: bool
     verified_at: datetime | None
+    verification_code: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -109,9 +112,10 @@ class OfficialMessageResponse(BaseModel):
     business_id: uuid.UUID
     external_message_id: str
     subject: str
+    body_text: str
     classification: str
     status: str
     received_at: datetime
-    deliveries: list[DeliveryResponse] = []
+    deliveries: list[DeliveryResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
