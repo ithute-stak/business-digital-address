@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.ithute import IthutePlatformClient
+from app.ithute import IthutePlatformClient, IthutePlatformError
 from app.main import app
 from app.security import require_user
 from app.services import OFFICIAL_LOCAL_PART_PREFIX, official_address_for, official_local_part
@@ -93,7 +93,10 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
         raise AssertionError(url)
 
     monkeypatch.setattr("app.ithute.httpx.post", fake_post)
-    settings = Settings(ithute_service_client_secret="x" * 32)
+    settings = Settings(
+        ithute_service_client_secret="x" * 32,
+        enable_real_mail_provisioning=True,
+    )
     client = IthutePlatformClient(settings)
     client.invite_identity(
         external_reference="business-owner:1",
@@ -105,7 +108,7 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
     client.provision_mailbox(
         external_reference="business:1",
         domain_name="ithute.co.ls",
-        local_part="bda-123",
+        local_part="BDA-123",
         display_name="Example Business",
     )
 
@@ -114,6 +117,43 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
     assert token_requests[0]["scope"] == "identity.invite"
     assert token_requests[1]["audience"] == "ithute-mail"
     assert token_requests[1]["scope"] == "mailbox.create"
+    mailbox_call = next(call for call in calls if call["url"].endswith("/mailboxes"))
+    assert mailbox_call["json"]["local_part"] == "bda-123"
+
+
+def test_mail_provisioning_client_cannot_bypass_kill_switch_or_namespace(monkeypatch) -> None:
+    def unexpected_post(*args, **kwargs):
+        raise AssertionError("mail safety checks must run before any external request")
+
+    monkeypatch.setattr("app.ithute.httpx.post", unexpected_post)
+
+    disabled = IthutePlatformClient(
+        Settings(
+            ithute_service_client_secret="x" * 32,
+            enable_real_mail_provisioning=False,
+        )
+    )
+    with pytest.raises(IthutePlatformError, match="provisioning is disabled"):
+        disabled.provision_mailbox(
+            external_reference="business:1",
+            domain_name="ithute.co.ls",
+            local_part="bda-123",
+            display_name="Example Business",
+        )
+
+    enabled = IthutePlatformClient(
+        Settings(
+            ithute_service_client_secret="x" * 32,
+            enable_real_mail_provisioning=True,
+        )
+    )
+    with pytest.raises(IthutePlatformError, match="outside the reserved BDA namespace"):
+        enabled.provision_mailbox(
+            external_reference="business:1",
+            domain_name="ithute.co.ls",
+            local_part="admin",
+            display_name="Example Business",
+        )
 
 
 def test_first_local_vertical_flow() -> None:
