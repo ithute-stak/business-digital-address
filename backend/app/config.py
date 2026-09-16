@@ -6,7 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://bda:bda_dev_password@db:5432/bda"
     environment: str = "development"
-    official_domain: str = "business.ls"
+
+    # Bootstrap defaults only. The active portal URL and official email domain
+    # are stored in the platform_configuration database row and can be changed
+    # later without modifying application code.
+    portal_base_url: str = "https://business.ithute.co.ls"
+    official_domain: str = "ithute.co.ls"
     cors_origins: str = "http://localhost:3000"
 
     auth_issuer: str = "https://auth.ithute.co.ls"
