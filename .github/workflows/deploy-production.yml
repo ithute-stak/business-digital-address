@@ -1,0 +1,270 @@
+name: Deploy Business Digital Address Production
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: business-digital-address-vps-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    name: Deploy current tested main release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_SSH_PASSPHRASE: ${{ secrets.VPS_SSH_PASSPHRASE }}
+      VPS_APP_DIR: /opt/business-digital-address
+
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+
+      - name: Require successful CI for this exact release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          successful_runs="$(
+            gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+              -f head_sha="$RELEASE_SHA" \
+              -f event=push \
+              -f status=completed \
+              -f per_page=20 \
+              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length'
+          )"
+          if [ "${successful_runs:-0}" -lt 1 ]; then
+            echo "Refusing to deploy ${RELEASE_SHA}: no successful main push CI run exists for this exact SHA." >&2
+            exit 1
+          fi
+          echo "Verified successful CI for release ${RELEASE_SHA}."
+
+      - name: Validate protected inputs
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" || { echo 'Missing VPS_HOST secret.' >&2; exit 1; }
+          test -n "$VPS_USER" || { echo 'Missing VPS_USER secret.' >&2; exit 1; }
+          test -n "$VPS_SSH_KEY" || { echo 'Missing VPS_SSH_KEY secret.' >&2; exit 1; }
+
+          normalized_host="$(printf '%s' "$VPS_HOST" | tr -d '\r\n\t ')"
+          normalized_user="$(printf '%s' "$VPS_USER" | tr -d '\r\n\t ')"
+          case "$normalized_user" in *@*) normalized_user="${normalized_user%%@*}" ;; esac
+          case "$normalized_host" in *@*) normalized_host="${normalized_host##*@}" ;; esac
+
+          [[ "$normalized_user" =~ ^[A-Za-z0-9._-]+$ ]] || { echo 'Invalid VPS_USER.' >&2; exit 1; }
+          [[ "$normalized_host" =~ ^[A-Za-z0-9._-]+$ ]] || { echo 'Invalid VPS_HOST.' >&2; exit 1; }
+          [ "$VPS_APP_DIR" = /opt/business-digital-address ] || { echo 'Refusing unexpected production path.' >&2; exit 1; }
+
+          printf 'BDA_VPS_HOST=%s\n' "$normalized_host" >> "$GITHUB_ENV"
+          printf 'BDA_VPS_USER=%s\n' "$normalized_user" >> "$GITHUB_ENV"
+
+      - name: Build immutable application images
+        run: |
+          set -euo pipefail
+          docker build -t "business-digital-address-backend:${RELEASE_SHA}" backend
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=/api/bda \
+            -t "business-digital-address-frontend:${RELEASE_SHA}" \
+            frontend
+          docker save "business-digital-address-backend:${RELEASE_SHA}" | gzip -1 > /tmp/bda-backend.tar.gz
+          docker save "business-digital-address-frontend:${RELEASE_SHA}" | gzip -1 > /tmp/bda-frontend.tar.gz
+          sha256sum /tmp/bda-backend.tar.gz /tmp/bda-frontend.tar.gz
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/bda_deploy"
+          chmod 600 "$HOME/.ssh/bda_deploy"
+          eval "$(ssh-agent -s)"
+          printf 'SSH_AUTH_SOCK=%s\n' "$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          printf 'SSH_AGENT_PID=%s\n' "$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          if [ -n "${VPS_SSH_PASSPHRASE:-}" ]; then
+            cat > /tmp/bda-askpass.sh <<'SH'
+          #!/usr/bin/env sh
+          printf '%s\n' "$VPS_SSH_PASSPHRASE"
+          SH
+            chmod 700 /tmp/bda-askpass.sh
+            SSH_ASKPASS=/tmp/bda-askpass.sh SSH_ASKPASS_REQUIRE=force DISPLAY=:0 setsid -w ssh-add "$HOME/.ssh/bda_deploy" </dev/null
+            rm -f /tmp/bda-askpass.sh
+          else
+            ssh-add "$HOME/.ssh/bda_deploy" </dev/null
+          fi
+          ssh-keyscan -T 10 -H "$BDA_VPS_HOST" >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Require operator-provisioned production environment
+        run: |
+          set -euo pipefail
+          remote="${BDA_VPS_USER}@${BDA_VPS_HOST}"
+          ssh "$remote" "APP_DIR='$VPS_APP_DIR' bash -s" <<'REMOTE'
+          set -euo pipefail
+          test "$APP_DIR" = /opt/business-digital-address
+          mkdir -p "$APP_DIR/releases" "$APP_DIR/backups"
+          chmod 700 "$APP_DIR/releases" "$APP_DIR/backups"
+          test -f "$APP_DIR/.env.production" || {
+            echo 'Missing /opt/business-digital-address/.env.production. Copy .env.production.example and provision real secrets before the first deployment.' >&2
+            exit 1
+          }
+          chmod 600 "$APP_DIR/.env.production"
+          REMOTE
+
+      - name: Transfer tested runtime bundle
+        run: |
+          set -euo pipefail
+          remote="${BDA_VPS_USER}@${BDA_VPS_HOST}"
+          release_dir="${VPS_APP_DIR}/releases/${RELEASE_SHA}"
+          ssh "$remote" "mkdir -p '$release_dir' && chmod 700 '$release_dir'"
+          scp compose.production.yml infrastructure/caddy/business-digital-address.caddy "$remote:$release_dir/"
+          scp /tmp/bda-backend.tar.gz /tmp/bda-frontend.tar.gz "$remote:$release_dir/"
+
+      - name: Deploy without replacing persistent data
+        run: |
+          set -euo pipefail
+          remote="${BDA_VPS_USER}@${BDA_VPS_HOST}"
+          ssh "$remote" "APP_DIR='$VPS_APP_DIR' RELEASE_SHA='$RELEASE_SHA' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          release_dir="$APP_DIR/releases/$RELEASE_SHA"
+          cleanup() {
+            rm -f "$release_dir/bda-backend.tar.gz" "$release_dir/bda-frontend.tar.gz"
+          }
+          trap cleanup EXIT
+
+          test "$APP_DIR" = /opt/business-digital-address
+          test -f "$APP_DIR/.env.production"
+          test -f "$release_dir/compose.production.yml"
+          test -f "$release_dir/business-digital-address.caddy"
+
+          cp "$release_dir/compose.production.yml" "$APP_DIR/compose.yml"
+          chmod 600 "$APP_DIR/.env.production"
+
+          echo '[BDA] Loading immutable images'
+          gzip -dc "$release_dir/bda-backend.tar.gz" | docker load
+          gzip -dc "$release_dir/bda-frontend.tar.gz" | docker load
+          docker network inspect public-edge >/dev/null 2>&1 || docker network create public-edge >/dev/null
+
+          cd "$APP_DIR"
+          export BDA_BACKEND_IMAGE=business-digital-address-backend
+          export BDA_FRONTEND_IMAGE=business-digital-address-frontend
+          export BDA_IMAGE_TAG="$RELEASE_SHA"
+          compose=(docker compose --env-file .env.production -p business-digital-address -f compose.yml)
+
+          rendered="$(mktemp)"
+          "${compose[@]}" config > "$rendered"
+          grep -Fq 'BDA_AUTH_REQUIRED: "true"' "$rendered" || { echo 'Production Auth must be required.' >&2; exit 1; }
+          grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' "$rendered" || { echo 'Development auth bypass must be disabled.' >&2; exit 1; }
+          if grep -Eq '^[[:space:]]+ports:' "$rendered"; then
+            echo 'Production topology must not publish application/database ports directly.' >&2
+            exit 1
+          fi
+          rm -f "$rendered"
+
+          echo '[BDA] Starting persistent PostgreSQL'
+          "${compose[@]}" up -d --no-build --pull never db
+          db_id="$("${compose[@]}" ps -q db)"
+          test -n "$db_id" || { echo 'BDA PostgreSQL container did not start.' >&2; exit 1; }
+          db_health=''
+          for _ in $(seq 1 45); do
+            db_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$db_id" 2>/dev/null || true)"
+            [ "$db_health" = healthy ] && break
+            sleep 2
+          done
+          [ "$db_health" = healthy ] || { "${compose[@]}" logs --tail=200 db; exit 1; }
+
+          timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup="$APP_DIR/backups/bda-before-${RELEASE_SHA}-${timestamp}.dump"
+          echo "[BDA] Backing up PostgreSQL to $backup"
+          "${compose[@]}" exec -T db sh -c 'pg_dump --format=custom --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB"' < /dev/null > "$backup"
+          test -s "$backup"
+
+          echo '[BDA] Applying Alembic migrations'
+          "${compose[@]}" run --rm migrate
+
+          echo '[BDA] Starting backend and frontend'
+          "${compose[@]}" up -d --no-build --pull never backend frontend
+
+          wait_healthy() {
+            service="$1"
+            container_id="$("${compose[@]}" ps -q "$service")"
+            test -n "$container_id" || { echo "Missing container for $service" >&2; return 1; }
+            state=''
+            for _ in $(seq 1 60); do
+              state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
+              [ "$state" = healthy ] && return 0
+              sleep 3
+            done
+            echo "$service failed health verification: ${state:-unknown}" >&2
+            "${compose[@]}" logs --tail=250 "$service"
+            return 1
+          }
+          wait_healthy backend
+          wait_healthy frontend
+
+          echo '[BDA] Installing product-owned public route'
+          edge_proxy_id="$(docker ps --filter publish=80 --format '{{.ID}} {{.Image}}' | awk '$2 ~ /^caddy:/ {print $1; exit}')"
+          test -n "$edge_proxy_id" || { echo 'Unable to locate the VPS public Caddy proxy.' >&2; exit 1; }
+          docker exec "$edge_proxy_id" grep -Fq 'import /data/product-routes/*.caddy' /etc/caddy/Caddyfile || {
+            echo 'Public edge does not support product-owned route fragments.' >&2
+            exit 1
+          }
+          if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$edge_proxy_id" | grep -q '"public-edge"'; then
+            docker network connect public-edge "$edge_proxy_id"
+          fi
+          docker exec "$edge_proxy_id" mkdir -p /data/product-routes
+
+          route=/data/product-routes/business-digital-address.caddy
+          had_previous_route=0
+          if docker exec "$edge_proxy_id" test -f "$route"; then
+            docker exec "$edge_proxy_id" cp "$route" "${route}.previous"
+            had_previous_route=1
+          fi
+          docker cp "$release_dir/business-digital-address.caddy" "$edge_proxy_id:${route}.next"
+          docker exec "$edge_proxy_id" mv "${route}.next" "$route"
+
+          rollback_route() {
+            if [ "$had_previous_route" -eq 1 ]; then
+              docker exec "$edge_proxy_id" mv "${route}.previous" "$route" || true
+            else
+              docker exec "$edge_proxy_id" rm -f "$route" || true
+            fi
+          }
+
+          if ! docker exec "$edge_proxy_id" caddy validate --config /etc/caddy/Caddyfile >/dev/null; then
+            rollback_route
+            echo 'BDA edge route failed Caddy validation; previous route restored.' >&2
+            exit 1
+          fi
+          if ! docker exec "$edge_proxy_id" caddy reload --config /etc/caddy/Caddyfile >/dev/null; then
+            rollback_route
+            docker exec "$edge_proxy_id" caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
+            echo 'BDA edge route failed to reload; previous route restored.' >&2
+            exit 1
+          fi
+          docker exec "$edge_proxy_id" rm -f "${route}.previous"
+
+          echo '[BDA] Verifying public readiness endpoint'
+          curl --retry 20 --retry-delay 3 --retry-all-errors -fsS https://business.ls/api/health/ready >/dev/null
+
+          printf '%s\n' "$RELEASE_SHA" > "$APP_DIR/current-release"
+          "${compose[@]}" ps
+          echo '[BDA] Production deployment is healthy and persistent PostgreSQL was preserved.'
+          REMOTE
+
+      - name: Deployment summary
+        run: |
+          echo "Business Digital Address release ${RELEASE_SHA} deployed to /opt/business-digital-address."
+          echo "Public endpoint: https://business.ls"

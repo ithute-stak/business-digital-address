@@ -107,3 +107,29 @@ jobs:
           grep -q "db:" /tmp/business-digital-address-compose.yml
           grep -q "BDA_DEV_AUTH_BYPASS: \"true\"" /tmp/business-digital-address-compose.yml
           grep -q "BDA_API_INTERNAL_URL: http://backend:8100" /tmp/business-digital-address-compose.yml
+
+  production-topology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Render locked production topology
+        env:
+          BDA_BACKEND_IMAGE: business-digital-address-backend
+          BDA_FRONTEND_IMAGE: business-digital-address-frontend
+          BDA_IMAGE_TAG: ci-production-topology
+        run: |
+          cp .env.production.example .env.production
+          docker compose --env-file .env.production -f compose.production.yml config >/tmp/bda-production.yml
+          grep -Fq 'BDA_AUTH_REQUIRED: "true"' /tmp/bda-production.yml
+          grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' /tmp/bda-production.yml
+          grep -Fq 'business-digital-address-web' /tmp/bda-production.yml
+          grep -Fq 'public-edge' /tmp/bda-production.yml
+          grep -Fq 'egress:' /tmp/bda-production.yml
+          grep -Fq 'internal: true' /tmp/bda-production.yml
+          if grep -Eq '^[[:space:]]+ports:' /tmp/bda-production.yml; then
+            echo 'Production topology must not publish application/database ports directly.' >&2
+            exit 1
+          fi
