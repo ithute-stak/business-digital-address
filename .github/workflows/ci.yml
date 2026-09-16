@@ -128,6 +128,8 @@ jobs:
           grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' /tmp/bda-production.yml
           grep -Fq 'BDA_PORTAL_BASE_URL: https://business.ithute.co.ls' /tmp/bda-production.yml
           grep -Fq 'BDA_OFFICIAL_DOMAIN: ithute.co.ls' /tmp/bda-production.yml
+          grep -Fq 'BDA_ENABLE_REAL_MAIL_PROVISIONING: "false"' /tmp/bda-production.yml
+          grep -Fq 'BDA_ENABLE_REAL_MAIL_FORWARDING: "false"' /tmp/bda-production.yml
           grep -Fq 'business-digital-address-web' /tmp/bda-production.yml
           grep -Fq 'public-edge' /tmp/bda-production.yml
           grep -Fq 'egress:' /tmp/bda-production.yml
