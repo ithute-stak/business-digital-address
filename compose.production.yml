@@ -25,8 +25,9 @@ services:
     environment: &backend_environment
       BDA_DATABASE_URL: ${BDA_DATABASE_URL:?BDA_DATABASE_URL is required}
       BDA_ENVIRONMENT: production
-      BDA_OFFICIAL_DOMAIN: business.ls
-      BDA_CORS_ORIGINS: https://business.ls
+      BDA_PORTAL_BASE_URL: ${BDA_PORTAL_BASE_URL:-https://business.ithute.co.ls}
+      BDA_OFFICIAL_DOMAIN: ${BDA_OFFICIAL_DOMAIN:-ithute.co.ls}
+      BDA_CORS_ORIGINS: ${BDA_PORTAL_BASE_URL:-https://business.ithute.co.ls}
       BDA_AUTH_ISSUER: https://auth.ithute.co.ls
       BDA_AUTH_JWKS_URL: https://auth.ithute.co.ls/.well-known/jwks.json
       BDA_AUTH_AUDIENCE: business-digital-address
@@ -72,7 +73,7 @@ services:
     image: ${BDA_FRONTEND_IMAGE:-business-digital-address-frontend}:${BDA_IMAGE_TAG:?BDA_IMAGE_TAG is required}
     restart: unless-stopped
     environment:
-      BDA_APP_URL: https://business.ls
+      BDA_APP_URL: ${BDA_PORTAL_BASE_URL:-https://business.ithute.co.ls}
       BDA_API_INTERNAL_URL: http://backend:8100
       BDA_ITHUTE_AUTH_URL: https://auth.ithute.co.ls
       BDA_OIDC_CLIENT_ID: business-digital-address

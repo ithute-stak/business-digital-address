@@ -18,6 +18,7 @@ bearer = HTTPBearer(auto_error=False)
 class UserPrincipal:
     sub: str
     email: str | None = None
+    is_platform_admin: bool = False
 
 
 class AuthVerifier:
@@ -41,7 +42,11 @@ class AuthVerifier:
         if not sub:
             raise HTTPException(status_code=401, detail="token subject is missing")
         email = claims.get("email")
-        return UserPrincipal(sub=sub, email=str(email) if email else None)
+        return UserPrincipal(
+            sub=sub,
+            email=str(email) if email else None,
+            is_platform_admin=claims.get("is_platform_admin") is True,
+        )
 
 
 @lru_cache
@@ -56,7 +61,7 @@ def require_user(
     if not settings.auth_required:
         if settings.environment.lower() == "production":
             raise HTTPException(status_code=503, detail="authentication cannot be disabled in production")
-        return UserPrincipal(sub="development-user", email="dev@local.invalid")
+        return UserPrincipal(sub="development-user", email="dev@local.invalid", is_platform_admin=False)
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Ithute Auth bearer token required")
     try:
