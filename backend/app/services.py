@@ -6,7 +6,7 @@ import json
 import re
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -24,9 +24,12 @@ def official_local_part(registration_number: str) -> str:
     compact = _NON_ALNUM.sub("", registration_number.strip().lower())
     if not compact:
         raise ValueError("registration number cannot produce an official address")
-    # Keep the address stable and comfortably inside the 64-character mailbox
-    # local-part limit enforced by Ithute Mail.
-    return f"b{compact}"[:64]
+    if len(compact) <= 63:
+        return f"b{compact}"
+    # Preserve readability for long registration identifiers while avoiding the
+    # collision risk of simply truncating two identifiers with the same prefix.
+    digest = hashlib.sha256(compact.encode("utf-8")).hexdigest()[:12]
+    return f"b{compact[:48]}{digest}"
 
 
 def official_address_for(registration_number: str, domain: str) -> tuple[str, str]:
@@ -57,7 +60,7 @@ def create_business_audit(
     )
 
 
-def create_verification_code(*, ttl_minutes: int) -> tuple[str, str, object]:
+def create_verification_code(*, ttl_minutes: int) -> tuple[str, str, datetime]:
     code = f"{secrets.randbelow(1_000_000):06d}"
     digest = hashlib.sha256(code.encode("utf-8")).hexdigest()
     expires_at = utcnow() + timedelta(minutes=ttl_minutes)
