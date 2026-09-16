@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     ithute_invite_url: str = "https://auth.ithute.co.ls/v1/platform/identity-invitations"
     ithute_mail_base_url: str = "https://api.ithute.co.ls/api/v1/platform/mail"
     enable_real_mail_provisioning: bool = False
+    # Kept separate from mailbox provisioning so the first production rollout
+    # can prove mailbox creation before any external copies are submitted.
+    enable_real_mail_forwarding: bool = False
     external_email_verification_ttl_minutes: int = 30
 
     # Development-only simulator identities. Production ignores these and
