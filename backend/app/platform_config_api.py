@@ -25,7 +25,6 @@ Principal = Annotated[UserPrincipal, Depends(require_user)]
 class PlatformConfigurationResponse(BaseModel):
     portal_base_url: str
     official_email_domain: str
-    updated_by: str | None
 
     model_config = {"from_attributes": True}
 
@@ -37,11 +36,7 @@ class PlatformConfigurationUpdate(BaseModel):
 
 @router.get("", response_model=PlatformConfigurationResponse)
 def read_platform_configuration(db: Db) -> PlatformConfigurationResponse:
-    """Return non-secret runtime addressing configuration.
-
-    This endpoint is intentionally public because the portal URL and official
-    email domain are public addressing metadata, not credentials.
-    """
+    """Return non-secret runtime addressing configuration."""
 
     return PlatformConfigurationResponse.model_validate(get_platform_configuration(db))
 
@@ -58,7 +53,7 @@ def update_platform_configuration(
         raise HTTPException(status_code=400, detail="at least one configuration value is required")
 
     settings = get_settings()
-    row = get_platform_configuration(db, settings)
+    row = get_platform_configuration(db)
     before = {
         "portal_base_url": row.portal_base_url,
         "official_email_domain": row.official_email_domain,
