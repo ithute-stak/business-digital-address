@@ -40,6 +40,8 @@ class OfficialAddress(Base):
     domain: Mapped[str] = mapped_column(String(253))
     address: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     mailbox_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    platform_binding_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    platform_mailbox_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     friendly_alias: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     provisioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
