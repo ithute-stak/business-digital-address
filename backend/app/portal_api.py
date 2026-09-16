@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from .config import get_settings
 from .db import get_db
 from .ithute import IthutePlatformClient, IthutePlatformError
+from .mail_forwarding import sync_inbound_forwarding
 from .models import AuditEvent, Business, BusinessMember, ExternalEmail, OfficialMessage
 from .portal_schemas import (
     ExternalEmailUpdate,
@@ -272,18 +273,47 @@ def update_external_email(
     principal: Principal,
 ) -> ExternalEmail:
     _require_manager(db, business_id, principal)
+    business = _business_for_user(db, business_id, principal)
     item = db.get(ExternalEmail, email_id)
     if item is None or item.business_id != business_id:
         raise HTTPException(status_code=404, detail="external email not found")
+    if payload.forward_official_mail and item.status != "verified":
+        raise HTTPException(status_code=409, detail="external email must be verified before forwarding can be enabled")
+
+    previous = item.forward_official_mail
     item.forward_official_mail = payload.forward_official_mail
     create_business_audit(
         db,
         business_id=business_id,
         action="external_email.forwarding.updated",
         actor_id=principal.sub,
-        details={"email": item.email, "enabled": item.forward_official_mail},
+        details={"email": item.email, "enabled": item.forward_official_mail, "mode": "all-inbound-copy"},
     )
     db.commit()
+    db.refresh(item)
+
+    config = get_settings()
+    try:
+        sync_inbound_forwarding(
+            db,
+            business,
+            actor_id=principal.sub,
+            strict=config.environment.lower() == "production",
+        )
+    except IthutePlatformError as exc:
+        item.forward_official_mail = previous
+        db.commit()
+        create_business_audit(
+            db,
+            business_id=business_id,
+            action="external_email.forwarding.sync_failed",
+            actor_id=config.ithute_service_client_id,
+            actor_type="service",
+            details={"email": item.email, "error": str(exc)},
+        )
+        db.commit()
+        if config.environment.lower() == "production":
+            raise HTTPException(status_code=502, detail="inbound forwarding could not be synchronized") from exc
     db.refresh(item)
     return item
 
@@ -296,10 +326,29 @@ def delete_external_email(
     principal: Principal,
 ) -> Response:
     _require_manager(db, business_id, principal)
+    business = _business_for_user(db, business_id, principal)
     item = db.get(ExternalEmail, email_id)
     if item is None or item.business_id != business_id:
         raise HTTPException(status_code=404, detail="external email not found")
     email = item.email
+
+    if item.forward_official_mail:
+        item.forward_official_mail = False
+        db.commit()
+        config = get_settings()
+        try:
+            sync_inbound_forwarding(
+                db,
+                business,
+                actor_id=principal.sub,
+                strict=config.environment.lower() == "production",
+            )
+        except IthutePlatformError as exc:
+            item.forward_official_mail = True
+            db.commit()
+            if config.environment.lower() == "production":
+                raise HTTPException(status_code=502, detail="forwarding could not be removed safely") from exc
+
     db.delete(item)
     create_business_audit(
         db,
