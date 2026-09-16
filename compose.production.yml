@@ -27,7 +27,7 @@ services:
       BDA_ENVIRONMENT: production
       BDA_PORTAL_BASE_URL: ${BDA_PORTAL_BASE_URL:-https://business.ithute.co.ls}
       BDA_OFFICIAL_DOMAIN: ${BDA_OFFICIAL_DOMAIN:-ithute.co.ls}
-      BDA_CORS_ORIGINS: https://business.ithute.co.ls
+      BDA_CORS_ORIGINS: ${BDA_PORTAL_BASE_URL:-https://business.ithute.co.ls}
       BDA_AUTH_ISSUER: https://auth.ithute.co.ls
       BDA_AUTH_JWKS_URL: https://auth.ithute.co.ls/.well-known/jwks.json
       BDA_AUTH_AUDIENCE: business-digital-address
