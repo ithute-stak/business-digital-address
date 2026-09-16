@@ -46,7 +46,13 @@ def normalize_email_domain(value: str) -> str:
     return raw
 
 
-def get_platform_configuration(db: Session) -> PlatformConfiguration:
+def get_platform_configuration(db: Session, _settings: object | None = None) -> PlatformConfiguration:
+    """Read the migrated singleton configuration row.
+
+    `_settings` is accepted only for call compatibility with older internal
+    callers. Active addressing values always come from PostgreSQL.
+    """
+
     row = db.scalar(select(PlatformConfiguration).where(PlatformConfiguration.id == 1))
     if row is None:
         raise HTTPException(
