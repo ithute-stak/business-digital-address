@@ -14,6 +14,8 @@ from .models import AuditEvent, Business, OfficialAddress, utcnow
 
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
+OFFICIAL_LOCAL_PART_PREFIX = "bda-"
+_MAX_EMAIL_LOCAL_PART_LENGTH = 64
 
 
 def normalize_identifier(value: str) -> str:
@@ -21,15 +23,26 @@ def normalize_identifier(value: str) -> str:
 
 
 def official_local_part(registration_number: str) -> str:
+    """Return the stable local part reserved to Business Digital Address.
+
+    Ithute Platform Mail grants BDA only the ``bda-`` namespace on the shared
+    temporary ``ithute.co.ls`` domain. Keeping the prefix product-owned and
+    non-configurable prevents a BDA runtime setting from escaping that grant.
+    """
+
     compact = _NON_ALNUM.sub("", registration_number.strip().lower())
     if not compact:
         raise ValueError("registration number cannot produce an official address")
-    if len(compact) <= 63:
-        return f"b{compact}"
+
+    readable_limit = _MAX_EMAIL_LOCAL_PART_LENGTH - len(OFFICIAL_LOCAL_PART_PREFIX)
+    if len(compact) <= readable_limit:
+        return f"{OFFICIAL_LOCAL_PART_PREFIX}{compact}"
+
     # Preserve readability for long registration identifiers while avoiding the
     # collision risk of simply truncating two identifiers with the same prefix.
     digest = hashlib.sha256(compact.encode("utf-8")).hexdigest()[:12]
-    return f"b{compact[:48]}{digest}"
+    readable_limit -= len(digest)
+    return f"{OFFICIAL_LOCAL_PART_PREFIX}{compact[:readable_limit]}{digest}"
 
 
 def official_address_for(registration_number: str, domain: str) -> tuple[str, str]:
