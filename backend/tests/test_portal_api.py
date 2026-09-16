@@ -31,7 +31,7 @@ def test_portal_snapshot_contains_real_business_data() -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["business"]["tin"] == business["tin"]
-    assert payload["business"]["official_address"]["address"].endswith("@business.ls")
+    assert payload["business"]["official_address"]["address"].endswith("@ithute.co.ls")
     assert payload["summary"]["authorised_members"] == 1
     assert payload["summary"]["official_messages"] == 0
     assert len(payload["members"]) == 1
