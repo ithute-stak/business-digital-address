@@ -45,9 +45,9 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: python -m pip install --disable-pip-version-check -r requirements.txt
-      - name: Compile backend
-        working-directory: backend
-        run: python -m compileall -q app alembic tests
+      - name: Compile backend and simulator clients
+        run: |
+          python -m compileall -q backend/app backend/alembic backend/tests simulators
       - name: Migrate PostgreSQL
         working-directory: backend
         run: alembic upgrade head
