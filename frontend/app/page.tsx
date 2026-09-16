@@ -1,7 +1,7 @@
 const capabilities = [
   ["Official business identity", "A stable digital address linked to the registered business and its TIN."],
   ["Official communications", "A retained inbox for authorised government and agency communications."],
-  ["Verified forwarding", "Businesses can later attach a verified custom email without losing the official copy."],
+  ["Verified forwarding", "Businesses can attach a verified custom email without losing the official copy."],
   ["Ithute security", "Human access is delegated to Ithute Auth instead of sharing mailbox passwords."],
 ];
 
@@ -16,9 +16,7 @@ export default function HomePage() {
             <small>Official communications platform</small>
           </span>
         </div>
-        <span className="signIn" title="Product OIDC redirect registration is completed when the production hostname is approved">
-          Ithute Auth foundation ready
-        </span>
+        <a className="signIn" href="/portal">Open business portal</a>
       </header>
 
       <section className="hero">
@@ -30,8 +28,8 @@ export default function HomePage() {
             keeping government messages in a durable business inbox.
           </p>
           <div className="heroActions">
-            <a href="#foundation" className="primaryAction">Explore the foundation</a>
-            <span className="statusPill">Foundation build · not production live</span>
+            <a href="/portal" className="primaryAction">Open the portal</a>
+            <span className="statusPill">Working foundation · production onboarding pending</span>
           </div>
         </div>
         <div className="addressCard" aria-label="Example official business address">
@@ -51,8 +49,8 @@ export default function HomePage() {
 
       <section id="foundation" className="section">
         <div className="sectionHeading">
-          <span className="eyebrow">First platform slice</span>
-          <h2>The foundation is separated cleanly from Ithute.</h2>
+          <span className="eyebrow">Business portal foundation</span>
+          <h2>The product is separated cleanly from Ithute.</h2>
           <p>Business records remain here. Ithute provides identity, mailbox provisioning and shared infrastructure.</p>
         </div>
         <div className="capabilityGrid">
