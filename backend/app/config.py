@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     auth_audience: str = "business-digital-address"
     auth_required: bool = True
 
-    ithute_token_url: str = "https://auth.ithute.co.ls/v1/service/token"
+    ithute_token_url: str = "https://auth.ithute.co.ls/v1/auth/service-token"
     ithute_service_client_id: str = "business-digital-address"
     ithute_service_client_secret: str | None = None
-    ithute_invite_url: str = "https://auth.ithute.co.ls/v1/platform/identity/invitations"
-    ithute_mail_base_url: str = "https://api.ithute.co.ls/platform/mail"
+    ithute_invite_url: str = "https://auth.ithute.co.ls/v1/platform/identity-invitations"
+    ithute_mail_base_url: str = "https://api.ithute.co.ls/api/v1/platform/mail"
     enable_real_mail_provisioning: bool = False
     external_email_verification_ttl_minutes: int = 30
 
