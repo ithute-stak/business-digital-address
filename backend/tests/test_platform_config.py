@@ -50,11 +50,11 @@ def test_non_admin_cannot_change_platform_addressing() -> None:
 
 
 def test_platform_admin_can_change_domains_without_code_and_existing_addresses_stay_stable() -> None:
-    before = _create_business("BEFORE")
-    assert before["official_address"]["address"].endswith("@ithute.co.ls")
-
     app.dependency_overrides[require_user] = _platform_admin
     try:
+        before = _create_business("BEFORE")
+        assert before["official_address"]["address"].endswith("@ithute.co.ls")
+
         changed = client.patch(
             "/api/v1/platform/config",
             json={
