@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -20,6 +22,11 @@ def test_official_address_is_stable_and_not_tin_based() -> None:
     local, address = official_address_for("2026/ABC-001", "BUSINESS.LS.")
     assert local == "b2026abc001"
     assert address == "b2026abc001@business.ls"
+
+    long_a = official_local_part("A" * 80)
+    long_b = official_local_part("A" * 79 + "B")
+    assert len(long_a) <= 64
+    assert long_a != long_b
 
 
 def test_platform_endpoints_match_ithute_contract() -> None:
@@ -154,7 +161,7 @@ def test_first_local_vertical_flow() -> None:
 
 
 def test_auth_cannot_be_disabled_in_production() -> None:
-    dependency = app.dependency_overrides.get(require_user)
-    assert dependency is None
     settings = Settings(environment="production", auth_required=False)
-    assert settings.auth_required is False
+    with pytest.raises(HTTPException) as exc:
+        require_user(credentials=None, settings=settings)
+    assert exc.value.status_code == 503
