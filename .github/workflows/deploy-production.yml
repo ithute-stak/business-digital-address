@@ -9,6 +9,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
@@ -31,6 +32,25 @@ jobs:
         with:
           ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
+
+      - name: Require successful CI for this exact release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          successful_runs="$(
+            gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+              -f head_sha="$RELEASE_SHA" \
+              -f event=push \
+              -f status=completed \
+              -f per_page=20 \
+              --jq '[.workflow_runs[] | select(.conclusion == "success")] | length'
+          )"
+          if [ "${successful_runs:-0}" -lt 1 ]; then
+            echo "Refusing to deploy ${RELEASE_SHA}: no successful main push CI run exists for this exact SHA." >&2
+            exit 1
+          fi
+          echo "Verified successful CI for release ${RELEASE_SHA}."
 
       - name: Validate protected inputs
         run: |
@@ -95,6 +115,7 @@ jobs:
           set -euo pipefail
           test "$APP_DIR" = /opt/business-digital-address
           mkdir -p "$APP_DIR/releases" "$APP_DIR/backups"
+          chmod 700 "$APP_DIR/releases" "$APP_DIR/backups"
           test -f "$APP_DIR/.env.production" || {
             echo 'Missing /opt/business-digital-address/.env.production. Copy .env.production.example and provision real secrets before the first deployment.' >&2
             exit 1
@@ -107,7 +128,7 @@ jobs:
           set -euo pipefail
           remote="${BDA_VPS_USER}@${BDA_VPS_HOST}"
           release_dir="${VPS_APP_DIR}/releases/${RELEASE_SHA}"
-          ssh "$remote" "mkdir -p '$release_dir'"
+          ssh "$remote" "mkdir -p '$release_dir' && chmod 700 '$release_dir'"
           scp compose.production.yml infrastructure/caddy/business-digital-address.caddy "$remote:$release_dir/"
           scp /tmp/bda-backend.tar.gz /tmp/bda-frontend.tar.gz "$remote:$release_dir/"
 
