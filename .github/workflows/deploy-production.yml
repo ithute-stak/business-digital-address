@@ -129,6 +129,27 @@ jobs:
             echo 'BDA_OFFICIAL_DOMAIN must be a DNS domain name in .env.production.' >&2
             exit 1
           }
+          grep -Eq '^BDA_ENABLE_REAL_MAIL_PROVISIONING=(true|false)$' "$APP_DIR/.env.production" || {
+            echo 'BDA_ENABLE_REAL_MAIL_PROVISIONING must be explicitly true or false.' >&2
+            exit 1
+          }
+          grep -Eq '^BDA_ENABLE_REAL_MAIL_FORWARDING=(true|false)$' "$APP_DIR/.env.production" || {
+            echo 'BDA_ENABLE_REAL_MAIL_FORWARDING must be explicitly true or false.' >&2
+            exit 1
+          }
+          provisioning="$(sed -n 's/^BDA_ENABLE_REAL_MAIL_PROVISIONING=//p' "$APP_DIR/.env.production" | tail -n 1)"
+          forwarding="$(sed -n 's/^BDA_ENABLE_REAL_MAIL_FORWARDING=//p' "$APP_DIR/.env.production" | tail -n 1)"
+          if [ "$forwarding" = true ]; then
+            [ "$provisioning" = true ] || {
+              echo 'External forwarding cannot be enabled while real BDA mailbox provisioning is disabled.' >&2
+              exit 1
+            }
+            service_secret="$(sed -n 's/^BDA_ITHUTE_SERVICE_CLIENT_SECRET=//p' "$APP_DIR/.env.production" | tail -n 1)"
+            [ -n "$service_secret" ] || {
+              echo 'External forwarding requires the managed Ithute BDA service credential.' >&2
+              exit 1
+            }
+          fi
           REMOTE
 
       - name: Transfer tested runtime bundle
@@ -188,6 +209,8 @@ jobs:
           grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' "$rendered" || { echo 'Development auth bypass must be disabled.' >&2; exit 1; }
           grep -Eq 'BDA_PORTAL_BASE_URL: https://[A-Za-z0-9.-]+' "$rendered" || { echo 'Rendered portal URL is invalid.' >&2; exit 1; }
           grep -Eq 'BDA_OFFICIAL_DOMAIN: [A-Za-z0-9.-]+' "$rendered" || { echo 'Rendered official email domain is invalid.' >&2; exit 1; }
+          grep -Eq 'BDA_ENABLE_REAL_MAIL_PROVISIONING: "(true|false)"' "$rendered" || { echo 'Rendered mailbox-provisioning switch is invalid.' >&2; exit 1; }
+          grep -Eq 'BDA_ENABLE_REAL_MAIL_FORWARDING: "(true|false)"' "$rendered" || { echo 'Rendered forwarding switch is invalid.' >&2; exit 1; }
           if grep -Eq '^[[:space:]]+ports:' "$rendered"; then
             echo 'Production topology must not publish application/database ports directly.' >&2
             exit 1
