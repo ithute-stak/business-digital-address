@@ -21,6 +21,7 @@ from .models import (
     OfficialMessage,
     utcnow,
 )
+from .platform_config import get_platform_configuration
 from .schemas import (
     AgencyCreate,
     AgencyResponse,
@@ -129,7 +130,11 @@ def _apply_owner_invitation(db: Session, business: Business, member: BusinessMem
 
 def _provision_official_mailbox(db: Session, business: Business) -> None:
     config = get_settings()
-    official = business.official_address or ensure_official_address(business, domain=config.official_domain)
+    platform_config = get_platform_configuration(db, config)
+    official = business.official_address or ensure_official_address(
+        business,
+        domain=platform_config.official_email_domain,
+    )
     if official.platform_binding_id and official.mailbox_status == "active":
         return
     if not config.ithute_service_client_secret:
@@ -195,7 +200,8 @@ def create_business(payload: BusinessCreate, db: Db, principal: Principal) -> Bu
     db.add(business)
     try:
         db.flush()
-        ensure_official_address(business, domain=get_settings().official_domain)
+        platform_config = get_platform_configuration(db)
+        ensure_official_address(business, domain=platform_config.official_email_domain)
         db.add(
             BusinessMember(
                 business_id=business.id,
