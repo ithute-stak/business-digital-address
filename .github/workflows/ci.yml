@@ -30,7 +30,8 @@ jobs:
     env:
       BDA_DATABASE_URL: postgresql+psycopg://bda:bda_ci_password@127.0.0.1:5432/bda
       BDA_ENVIRONMENT: development
-      BDA_OFFICIAL_DOMAIN: business.ls
+      BDA_PORTAL_BASE_URL: https://business.ithute.co.ls
+      BDA_OFFICIAL_DOMAIN: ithute.co.ls
       BDA_AUTH_REQUIRED: "false"
     steps:
       - uses: actions/checkout@v5
@@ -81,7 +82,7 @@ jobs:
         working-directory: frontend
         env:
           NEXT_PUBLIC_API_URL: /api/bda
-          BDA_APP_URL: https://business.ls
+          BDA_APP_URL: https://business.ithute.co.ls
           BDA_API_INTERNAL_URL: http://backend:8100
           BDA_ITHUTE_AUTH_URL: https://auth.ithute.co.ls
           BDA_OIDC_CLIENT_ID: business-digital-address
@@ -125,6 +126,8 @@ jobs:
           docker compose --env-file .env.production -f compose.production.yml config >/tmp/bda-production.yml
           grep -Fq 'BDA_AUTH_REQUIRED: "true"' /tmp/bda-production.yml
           grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' /tmp/bda-production.yml
+          grep -Fq 'BDA_PORTAL_BASE_URL: https://business.ithute.co.ls' /tmp/bda-production.yml
+          grep -Fq 'BDA_OFFICIAL_DOMAIN: ithute.co.ls' /tmp/bda-production.yml
           grep -Fq 'business-digital-address-web' /tmp/bda-production.yml
           grep -Fq 'public-edge' /tmp/bda-production.yml
           grep -Fq 'egress:' /tmp/bda-production.yml
