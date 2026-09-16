@@ -40,6 +40,8 @@ def reconcile_activated_memberships(
 
     config = settings or get_settings()
     if not config.ithute_service_client_secret:
+        if raise_on_platform_error:
+            raise IthutePlatformError("Ithute managed service credential is not configured")
         return 0
 
     try:
