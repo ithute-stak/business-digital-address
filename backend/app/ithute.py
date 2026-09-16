@@ -30,6 +30,15 @@ class MailSendResult:
     error: str | None
 
 
+@dataclass(frozen=True)
+class MailboxForwardingResult:
+    binding_id: str
+    address: str
+    destination: str | None
+    active: bool
+    runtime_synced: bool
+
+
 class IthutePlatformClient:
     def __init__(self, settings: Settings, *, timeout_seconds: float = 10.0):
         self.settings = settings
@@ -137,8 +146,6 @@ class IthutePlatformClient:
         display_name: str,
         quota_bytes: int = 1024**3,
     ) -> MailboxProvisionResult:
-        # This check lives at the platform-client boundary so explicit/manual API
-        # calls cannot bypass the same kill switch used by automatic provisioning.
         if not self.settings.enable_real_mail_provisioning:
             raise IthutePlatformError("real Ithute Mail provisioning is disabled")
 
@@ -169,6 +176,62 @@ class IthutePlatformClient:
             mailbox_id=str(data["mailbox_id"]),
             address=str(data["address"]),
             status=str(data["status"]),
+        )
+
+    def configure_inbound_forwarding(self, *, binding_id: str, destination: str) -> MailboxForwardingResult:
+        """Copy every message received by a BDA-owned mailbox to one verified external address."""
+
+        if not self.settings.enable_real_mail_forwarding:
+            raise IthutePlatformError("real external mail forwarding is disabled")
+        if not binding_id.strip():
+            raise IthutePlatformError("official mailbox binding is not configured")
+        normalized_destination = destination.strip().lower()
+        if not normalized_destination or "@" not in normalized_destination:
+            raise IthutePlatformError("forwarding destination is invalid")
+
+        token = self._service_token(audience="ithute-mail", scope="mail.forward")
+        response = httpx.put(
+            f"{self.settings.ithute_mail_base_url.rstrip('/')}/mailboxes/{quote(binding_id.strip(), safe='')}/inbound-forwarding",
+            json={"destination": normalized_destination},
+            headers={"authorization": f"Bearer {token}"},
+            timeout=self.timeout_seconds,
+        )
+        self._raise_for_status(response, "Ithute Mail inbound forwarding configuration failed")
+        data = response.json()
+        required = ("binding_id", "address", "active", "runtime_synced")
+        if not isinstance(data, dict) or any(key not in data for key in required):
+            raise IthutePlatformError("Ithute Mail returned an invalid forwarding response")
+        return MailboxForwardingResult(
+            binding_id=str(data["binding_id"]),
+            address=str(data["address"]),
+            destination=str(data["destination"]) if data.get("destination") else None,
+            active=bool(data["active"]),
+            runtime_synced=bool(data["runtime_synced"]),
+        )
+
+    def disable_inbound_forwarding(self, *, binding_id: str) -> MailboxForwardingResult:
+        if not self.settings.enable_real_mail_forwarding:
+            raise IthutePlatformError("real external mail forwarding is disabled")
+        if not binding_id.strip():
+            raise IthutePlatformError("official mailbox binding is not configured")
+
+        token = self._service_token(audience="ithute-mail", scope="mail.forward")
+        response = httpx.delete(
+            f"{self.settings.ithute_mail_base_url.rstrip('/')}/mailboxes/{quote(binding_id.strip(), safe='')}/inbound-forwarding",
+            headers={"authorization": f"Bearer {token}"},
+            timeout=self.timeout_seconds,
+        )
+        self._raise_for_status(response, "Ithute Mail inbound forwarding removal failed")
+        data = response.json()
+        required = ("binding_id", "address", "active", "runtime_synced")
+        if not isinstance(data, dict) or any(key not in data for key in required):
+            raise IthutePlatformError("Ithute Mail returned an invalid forwarding response")
+        return MailboxForwardingResult(
+            binding_id=str(data["binding_id"]),
+            address=str(data["address"]),
+            destination=str(data["destination"]) if data.get("destination") else None,
+            active=bool(data["active"]),
+            runtime_synced=bool(data["runtime_synced"]),
         )
 
     def send_official_copy(
