@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -89,6 +90,34 @@ class IthutePlatformClient:
         if not isinstance(data, dict) or not data.get("id"):
             raise IthutePlatformError("Ithute Auth returned an invalid invitation response")
         return data
+
+    def activated_invitations_for_subject(self, *, user_sub: str) -> list[dict[str, Any]]:
+        """Return consumed invitations created by this BDA service for one Auth subject."""
+
+        normalized_sub = user_sub.strip()
+        if not normalized_sub:
+            raise IthutePlatformError("Ithute Auth subject is required")
+        token = self._service_token(audience="ithute-auth", scope="identity.invite")
+        response = httpx.get(
+            f"{self.settings.ithute_invite_url.rstrip('/')}/activated-sub/{quote(normalized_sub, safe='')}",
+            headers={"authorization": f"Bearer {token}"},
+            timeout=self.timeout_seconds,
+        )
+        self._raise_for_status(response, "Ithute activated invitation lookup failed")
+        data = response.json()
+        if not isinstance(data, list):
+            raise IthutePlatformError("Ithute Auth returned an invalid activated invitation response")
+        result: list[dict[str, Any]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                raise IthutePlatformError("Ithute Auth returned an invalid activated invitation item")
+            invitation_id = item.get("id")
+            external_reference = item.get("external_reference")
+            activated_sub = item.get("activated_sub")
+            if not invitation_id or not external_reference or activated_sub != normalized_sub:
+                raise IthutePlatformError("Ithute Auth returned an invalid activated invitation item")
+            result.append(item)
+        return result
 
     def provision_mailbox(
         self,
