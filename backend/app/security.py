@@ -33,11 +33,10 @@ class AuthVerifier:
             algorithms=["RS256"],
             issuer=self.settings.auth_issuer,
             audience=self.settings.auth_audience,
-            options={"require": ["exp", "iat", "sub"]},
+            options={"require": ["exp", "iat", "sub", "token_use"]},
         )
-        token_use = claims.get("token_use") or claims.get("typ")
-        if token_use in {"service", "machine"} or claims.get("service_auth"):
-            raise HTTPException(status_code=401, detail="human Ithute identity token required")
+        if claims.get("token_use") != "access" or claims.get("service_auth"):
+            raise HTTPException(status_code=401, detail="Ithute human access token required")
         sub = str(claims.get("sub") or "").strip()
         if not sub:
             raise HTTPException(status_code=401, detail="token subject is missing")
