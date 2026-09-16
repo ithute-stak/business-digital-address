@@ -11,21 +11,23 @@ from app.config import Settings
 from app.ithute import IthutePlatformClient
 from app.main import app
 from app.security import require_user
-from app.services import official_address_for, official_local_part
+from app.services import OFFICIAL_LOCAL_PART_PREFIX, official_address_for, official_local_part
 
 
 ROOT = Path(__file__).parents[1]
 
 
-def test_official_address_is_stable_and_not_tin_based() -> None:
-    assert official_local_part("2026/ABC-001") == "b2026abc001"
+def test_official_address_is_stable_not_tin_based_and_namespace_scoped() -> None:
+    assert OFFICIAL_LOCAL_PART_PREFIX == "bda-"
+    assert official_local_part("2026/ABC-001") == "bda-2026abc001"
     local, address = official_address_for("2026/ABC-001", "ITHUTE.CO.LS.")
-    assert local == "b2026abc001"
-    assert address == "b2026abc001@ithute.co.ls"
+    assert local == "bda-2026abc001"
+    assert address == "bda-2026abc001@ithute.co.ls"
 
     long_a = official_local_part("A" * 80)
     long_b = official_local_part("A" * 79 + "B")
     assert len(long_a) <= 64
+    assert long_a.startswith("bda-")
     assert long_a != long_b
 
 
@@ -39,17 +41,25 @@ def test_platform_endpoints_match_ithute_contract() -> None:
     assert settings.official_domain == "ithute.co.ls"
 
 
-def test_alembic_revisions_are_safe_and_platform_config_is_seeded() -> None:
+def test_alembic_revisions_are_safe_platform_config_is_seeded_and_pending_addresses_migrate() -> None:
     core = (ROOT / "alembic" / "versions" / "0001_bda_core.py").read_text(encoding="utf-8")
     config = (ROOT / "alembic" / "versions" / "0002_platform_config.py").read_text(encoding="utf-8")
+    namespace = (ROOT / "alembic" / "versions" / "0003_reserved_mail_namespace.py").read_text(encoding="utf-8")
     assert 'revision = "0001_bda_core"' in core
     assert 'revision = "0002_platform_config"' in config
+    assert 'revision = "0003_reserved_mail_namespace"' in namespace
+    assert 'down_revision = "0002_platform_config"' in namespace
     assert len("0001_bda_core") <= 32
     assert len("0002_platform_config") <= 32
+    assert len("0003_reserved_mail_namespace") <= 32
     assert '"platform_binding_id"' in core
     assert '"platform_mailbox_id"' in core
     assert 'portal="https://business.ithute.co.ls"' in config
     assert 'domain="ithute.co.ls"' in config
+    assert '_RESERVED_PREFIX = "bda-"' in namespace
+    assert "oa.platform_binding_id IS NULL" in namespace
+    assert "oa.platform_mailbox_id IS NULL" in namespace
+    assert "oa.provisioned_at IS NULL" in namespace
 
 
 def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
@@ -75,7 +85,7 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
                 {
                     "binding_id": str(uuid.uuid4()),
                     "mailbox_id": str(uuid.uuid4()),
-                    "address": "b123@ithute.co.ls",
+                    "address": "bda-123@ithute.co.ls",
                     "status": "active",
                 },
                 201,
@@ -95,7 +105,7 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
     client.provision_mailbox(
         external_reference="business:1",
         domain_name="ithute.co.ls",
-        local_part="b123",
+        local_part="bda-123",
         display_name="Example Business",
     )
 
@@ -124,6 +134,7 @@ def test_first_local_vertical_flow() -> None:
     business = created.json()
     business_id = business["id"]
     assert business["tin"] == tin
+    assert business["official_address"]["local_part"].startswith("bda-")
     assert business["official_address"]["address"].endswith("@ithute.co.ls")
     assert business["official_address"]["mailbox_status"] == "pending"
 

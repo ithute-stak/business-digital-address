@@ -34,10 +34,13 @@ Until a dedicated Business Digital Address domain is acquired, the product uses:
 
 - Portal: `https://business.ithute.co.ls`
 - Official business email domain: `ithute.co.ls`
+- Reserved BDA mailbox namespace: `bda-`
 
-These are not compiled into the business rules as permanent values. PostgreSQL stores the active `portal_base_url` and `official_email_domain` in the singleton `platform_configuration` row. An Ithute platform administrator can update them through `PATCH /api/v1/platform/config` without changing application source code.
+The portal and email domain are not compiled into the business rules as permanent values. PostgreSQL stores the active `portal_base_url` and `official_email_domain` in the singleton `platform_configuration` row. An Ithute platform administrator can update them through `PATCH /api/v1/platform/config` without changing application source code.
 
-A later portal-domain switch still requires matching DNS, Caddy and Ithute Auth redirect configuration. A later mail-domain switch requires the new mail domain to be provisioned in Ithute Mail. Existing official addresses are never silently rewritten when the configured domain changes; they should be retained as aliases or migrated deliberately.
+The `bda-` local-part prefix is intentionally product-owned rather than runtime-configurable. Ithute Platform Mail grants Business Digital Address only that reserved namespace on the shared temporary domain, so changing a BDA database setting cannot expand its mailbox authority.
+
+A later portal-domain switch still requires matching DNS, Caddy and Ithute Auth redirect configuration. A later mail-domain switch requires the new mail domain to be provisioned in Ithute Mail. Existing provisioned official addresses are never silently rewritten; they should be retained as aliases or migrated deliberately.
 
 ## First usable flow
 
@@ -58,7 +61,7 @@ Trade / business registration
  invite/activate owner     provision address
                                  |
                                  v
-                     b<registration>@ithute.co.ls
+                  bda-<registration>@ithute.co.ls
                                  |
                                  v
                            Official inbox
@@ -148,15 +151,17 @@ portal_base_url       https://business.ithute.co.ls
 official_email_domain ithute.co.ls
 ```
 
-Changing `official_email_domain` affects newly generated official addresses. Existing addresses remain unchanged so an administrative edit cannot unexpectedly invalidate addresses that have already been distributed externally.
+Changing `official_email_domain` affects newly generated official addresses. Existing addresses remain unchanged by the configuration edit itself so an administrative change cannot unexpectedly invalidate addresses that have already been distributed externally.
+
+Migration `0003_reserved_mail_namespace` moves only never-provisioned official addresses from the old `b...` form to the protected `bda-...` namespace. Any address already bound to Ithute Mail is deliberately preserved.
 
 ## Current foundation scope
 
-The application has the business/TIN/address model, working business portal, secure Ithute OIDC/PKCE browser integration, official inbox storage, external-email verification controls, guarded production topology, Ithute platform integration boundaries, and scope-protected Trade/RSL machine integration endpoints.
+The application has the business/TIN/address model, working business portal, secure Ithute OIDC/PKCE browser integration, exact-sub owner invitation reconciliation, official inbox storage, external-email verification controls, guarded production topology, Ithute platform integration boundaries, and scope-protected Trade/RSL machine integration endpoints.
 
 The current Ithute Auth callback target is `https://business.ithute.co.ls/api/auth/callback`.
 
-Real Trade/RSL production use still requires the corresponding managed Ithute service clients to be granted the `business-digital-address` audience and their least-privilege scopes. Real mailbox provisioning remains disabled until the temporary `ithute.co.ls` mail-domain grant is constrained safely for Business Digital Address addresses.
+The Trade and RSL simulator managed clients are already granted their least-privilege Business Digital Address audience/scopes in Ithute Auth. Ithute Platform Mail now enforces client-owned local-part namespaces. Real BDA mailbox provisioning remains disabled until the explicit `business-digital-address` grant for `ithute.co.ls` + `bda-` and the matching managed service permission are created and verified.
 
 ## Security rules
 
@@ -168,5 +173,6 @@ Real Trade/RSL production use still requires the corresponding managed Ithute se
 6. A failed forwarding copy must not mark the official inbox delivery as failed.
 7. Government/agency integrations use authenticated, auditable, scope-limited service identities.
 8. Notification/Push/SMS remain optional; official email/inbox delivery is the source of truth.
-9. Portal/email domain changes are auditable configuration changes; existing official addresses are not silently rewritten.
+9. Portal/email domain changes are auditable configuration changes; existing provisioned official addresses are not silently rewritten.
 10. Development simulator identities are rejected in production; production integrations require managed Ithute service JWTs.
+11. Business Digital Address may provision only the Ithute Mail local-part namespace explicitly granted to it; on the temporary shared domain that namespace is `bda-`.
