@@ -42,7 +42,10 @@ A later portal-domain switch still requires matching DNS, Caddy and Ithute Auth 
 ## First usable flow
 
 ```text
-Business registration / Trade simulator
+Trade / business registration
+              |
+        managed service JWT
+        business.register
               |
               v
       Business Digital Address
@@ -57,14 +60,50 @@ Business registration / Trade simulator
                                  v
                      b<registration>@ithute.co.ls
                                  |
-                   +-------------+-------------+
-                   |                           |
-                   v                           v
-             Official inbox            verified custom email
-                                          forwarding copy
+                                 v
+                           Official inbox
+                                 ^
+                                 |
+                         official-message.send
+                         managed service JWT
+                                 |
+                          RSL / agency service
 ```
 
 The configured official address is the canonical government/business communication destination. A verified external company email is an additional delivery destination; forwarding must never remove the official copy.
+
+## Trade and agency integrations
+
+The machine integration surface is deliberately separate from the human portal:
+
+- `POST /api/v1/integrations/trade/businesses` requires a managed Ithute service token for audience `business-digital-address` with scope `business.register`.
+- `POST /api/v1/integrations/agencies/messages` requires a managed Ithute service token for audience `business-digital-address` with scope `official-message.send`.
+
+The backend accepts only Ithute RS256 service JWTs carrying `token_use=service`, `service_auth=managed`, a matching `sub=service:<azp>`, the correct audience, and the requested scope. Legacy environment-secret service tokens are rejected at this boundary.
+
+Trade registration is idempotent for an already-registered registration-number/TIN pair. A replay that changes the legal identity conflicts instead of silently rewriting a business. Agency messages are idempotent per authenticated agency and external message ID; reusing the same ID with different content returns a conflict.
+
+Agency identity is derived from the authenticated service client rather than accepted from request JSON. For example, `rsl-simulator` is bound to the RSL simulator agency and cannot submit a message claiming to be another agency.
+
+Local development can exercise the same endpoints with the explicit `X-BDA-Dev-Service` simulator identity header. That shortcut is disabled in production. Runnable helpers are provided:
+
+```bash
+# With local Docker Compose running, no Ithute service secret is needed.
+python simulators/trade_simulator.py \
+  --registration REG-001 \
+  --tin 200000001 \
+  --legal-name "Example Holdings" \
+  --owner-name "Business Owner" \
+  --owner-email owner@example.com \
+  --preferred-channel email
+
+python simulators/rsl_simulator.py \
+  --tin 200000001 \
+  --subject "Official tax communication" \
+  --body "Please sign in to your official business inbox."
+```
+
+For a non-local environment, set `BDA_BASE_URL`, `ITHUTE_AUTH_URL`, and `ITHUTE_SERVICE_CLIENT_SECRET`; each simulator then obtains its own scoped Ithute service token instead of using the development header.
 
 ## Technology
 
@@ -80,6 +119,7 @@ The configured official address is the canonical government/business communicati
 ```text
 backend/       FastAPI API, domain model, migrations and Ithute clients
 frontend/      Business portal and secure Ithute Auth BFF
+simulators/    Trade and RSL integration test clients
 infrastructure/ product-owned edge routing
 .github/       CI and guarded manual production deployment
 ```
@@ -112,9 +152,11 @@ Changing `official_email_domain` affects newly generated official addresses. Exi
 
 ## Current foundation scope
 
-The application has the business/TIN/address model, working business portal, secure Ithute OIDC/PKCE browser integration, official inbox storage, external-email verification controls, guarded production topology and Ithute platform integration boundaries.
+The application has the business/TIN/address model, working business portal, secure Ithute OIDC/PKCE browser integration, official inbox storage, external-email verification controls, guarded production topology, Ithute platform integration boundaries, and scope-protected Trade/RSL machine integration endpoints.
 
-The Ithute Auth platform must contain the Business Digital Address OIDC registration before end-user login is activated in production. The current callback target is `https://business.ithute.co.ls/api/auth/callback`.
+The current Ithute Auth callback target is `https://business.ithute.co.ls/api/auth/callback`.
+
+Real Trade/RSL production use still requires the corresponding managed Ithute service clients to be granted the `business-digital-address` audience and their least-privilege scopes. Real mailbox provisioning remains disabled until the temporary `ithute.co.ls` mail-domain grant is constrained safely for Business Digital Address addresses.
 
 ## Security rules
 
@@ -124,6 +166,7 @@ The Ithute Auth platform must contain the Business Digital Address OIDC registra
 4. Official messages are retained before any external forwarding attempt.
 5. External forwarding addresses must be verified before use.
 6. A failed forwarding copy must not mark the official inbox delivery as failed.
-7. Government/agency integrations must use authenticated, auditable service identities when activated.
+7. Government/agency integrations use authenticated, auditable, scope-limited service identities.
 8. Notification/Push/SMS remain optional; official email/inbox delivery is the source of truth.
 9. Portal/email domain changes are auditable configuration changes; existing official addresses are not silently rewritten.
+10. Development simulator identities are rejected in production; production integrations require managed Ithute service JWTs.
