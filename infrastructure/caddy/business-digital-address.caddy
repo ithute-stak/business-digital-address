@@ -1,0 +1,12 @@
+business.ls {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy no-referrer
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    }
+
+    reverse_proxy business-digital-address-web:3000
+}
