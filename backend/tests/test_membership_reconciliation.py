@@ -82,7 +82,6 @@ def test_reconciliation_activates_only_the_exact_ithute_subject(monkeypatch) -> 
         )
     ) is not None
 
-    # Replaying the same trusted Auth result cannot create another activation.
     assert reconcile_activated_memberships(db, principal, settings=_settings()) == 0
 
 
@@ -129,9 +128,10 @@ def test_reconciliation_rejects_wrong_subject_and_wrong_external_reference(monke
     assert member.status == "invited"
 
 
-def test_reconciliation_does_not_duplicate_an_existing_business_membership(monkeypatch) -> None:
+def test_reconciliation_merges_duplicate_business_membership_and_keeps_stronger_role(monkeypatch) -> None:
     db = _db()
     business, invited = _pending_member(db)
+    invited_id = invited.id
     sub = str(uuid.uuid4())
     existing = BusinessMember(
         business_id=business.id,
@@ -141,6 +141,7 @@ def test_reconciliation_does_not_duplicate_an_existing_business_membership(monke
     )
     db.add(existing)
     db.commit()
+    existing_id = existing.id
 
     def activated(self, *, user_sub: str):
         return [
@@ -160,9 +161,12 @@ def test_reconciliation_does_not_duplicate_an_existing_business_membership(monke
         UserPrincipal(sub=sub),
         settings=_settings(),
     ) == 0
-    db.refresh(invited)
-    assert invited.auth_user_sub is None
-    assert invited.status == "linked_existing"
+
+    assert db.get(BusinessMember, invited_id) is None
+    merged = db.get(BusinessMember, existing_id)
+    assert merged is not None
+    assert merged.role == "owner"
+    assert merged.status == "active"
     assert db.scalar(
         select(AuditEvent).where(
             AuditEvent.business_id == business.id,
