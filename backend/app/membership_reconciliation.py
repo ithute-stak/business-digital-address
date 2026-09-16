@@ -11,6 +11,7 @@ from .services import create_business_audit
 
 
 _ALLOWED_PENDING_STATUSES = {"invited"}
+_ROLE_PRIORITY = {"member": 1, "admin": 2, "owner": 3}
 
 
 def _expected_external_references(member: BusinessMember) -> set[str]:
@@ -88,18 +89,25 @@ def reconcile_activated_memberships(
             )
         )
         if existing is not None:
-            member.status = "linked_existing"
+            invited_member_id = str(member.id)
+            invitation_id = member.invitation_id
+            previous_role = existing.role
+            if _ROLE_PRIORITY.get(member.role, 0) > _ROLE_PRIORITY.get(existing.role, 0):
+                existing.role = member.role
             create_business_audit(
                 db,
                 business_id=member.business_id,
                 action="member.invitation.linked_existing",
                 actor_id=principal.sub,
                 details={
-                    "member_id": str(member.id),
+                    "member_id": invited_member_id,
                     "existing_member_id": str(existing.id),
-                    "invitation_id": member.invitation_id,
+                    "invitation_id": invitation_id,
+                    "previous_role": previous_role,
+                    "effective_role": existing.role,
                 },
             )
+            db.delete(member)
             changed = True
             continue
 
