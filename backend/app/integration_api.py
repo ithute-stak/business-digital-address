@@ -180,6 +180,118 @@ def _maybe_provision_official_mailbox(
     db.commit()
 
 
+def _forward_pending_official_copies(
+    db: Session,
+    *,
+    business: Business,
+    agency: Agency,
+    message: OfficialMessage,
+    actor_client_id: str,
+    config: Settings,
+) -> None:
+    """Best-effort forward after the official inbox copy is already committed."""
+
+    if not config.enable_real_mail_forwarding:
+        return
+
+    pending = [
+        delivery
+        for delivery in message.deliveries
+        if delivery.channel == "external_forward" and delivery.status == "pending_provider"
+    ]
+    if not pending:
+        return
+
+    official = business.official_address
+    deferred_reason: str | None = None
+    if not config.ithute_service_client_secret:
+        deferred_reason = "Business Digital Address Ithute service credential is not configured"
+    elif official is None or not official.platform_binding_id or official.mailbox_status != "active":
+        deferred_reason = "official Ithute mailbox is not active"
+
+    if deferred_reason:
+        for delivery in pending:
+            delivery.last_error = deferred_reason
+        create_business_audit(
+            db,
+            business_id=business.id,
+            action="official_message.forward.deferred",
+            actor_id=actor_client_id,
+            actor_type="service",
+            details={"message_id": str(message.id), "reason": deferred_reason, "pending": len(pending)},
+        )
+        db.commit()
+        return
+
+    forward_text = (
+        "This is a forwarded copy of an official communication retained in your "
+        "Business Digital Address official inbox.\n\n"
+        f"Agency: {agency.name}\n"
+        f"Official reference: {message.external_message_id}\n"
+        f"Official inbox address: {official.address}\n\n"
+        f"{message.body_text}"
+    )
+    client = IthutePlatformClient(config)
+    for delivery in pending:
+        try:
+            result = client.send_official_copy(
+                binding_id=official.platform_binding_id,
+                external_reference=f"message-delivery:{delivery.id}",
+                recipient=delivery.target,
+                subject=message.subject,
+                text=forward_text,
+            )
+        except IthutePlatformError as exc:
+            # Keep this retryable. The Ithute-side external reference is
+            # idempotent, so replaying the agency message later cannot blindly
+            # create a duplicate if the first HTTP response was lost.
+            delivery.last_error = str(exc)[:255]
+            create_business_audit(
+                db,
+                business_id=business.id,
+                action="official_message.forward.deferred",
+                actor_id=actor_client_id,
+                actor_type="service",
+                details={"delivery_id": str(delivery.id), "target": delivery.target, "error": str(exc)},
+            )
+            continue
+
+        delivery.provider_reference = result.provider_message_id or result.delivery_id
+        delivery.last_error = result.error[:255] if result.error else None
+        if result.status == "failed":
+            delivery.status = "failed"
+            action = "official_message.forward.failed"
+        elif result.status == "delivered":
+            delivery.status = "delivered"
+            delivery.delivered_at = utcnow()
+            action = "official_message.forward.delivered"
+        elif result.status == "queued":
+            delivery.status = "submitted"
+            action = "official_message.forward.submitted"
+        else:
+            # `submitting` can be returned when Ithute has a durable idempotency
+            # reservation but the final SMTP result is not yet known. Do not
+            # claim delivery or submit another copy.
+            delivery.status = "pending_provider"
+            action = "official_message.forward.pending"
+
+        create_business_audit(
+            db,
+            business_id=business.id,
+            action=action,
+            actor_id=actor_client_id,
+            actor_type="service",
+            details={
+                "delivery_id": str(delivery.id),
+                "target": delivery.target,
+                "platform_delivery_id": result.delivery_id,
+                "provider_message_id": result.provider_message_id,
+                "platform_status": result.status,
+            },
+        )
+    db.commit()
+
+
 @router.post("/trade/businesses", response_model=TradeBusinessRegistrationResponse, status_code=201)
 def register_business_from_trade(
     payload: TradeBusinessRegistrationRequest,
@@ -337,6 +449,14 @@ def deliver_official_message(
         )
         if not same_payload:
             raise HTTPException(status_code=409, detail="external message ID was already used for different content")
+        _forward_pending_official_copies(
+            db,
+            business=business,
+            agency=agency,
+            message=existing,
+            actor_client_id=principal.client_id,
+            config=config,
+        )
         return AgencyOfficialMessageResponse(
             message=OfficialMessageResponse.model_validate(existing),
             delivery_status="existing",
@@ -385,6 +505,8 @@ def deliver_official_message(
         },
     )
     try:
+        # Commit retention before any optional forwarding call. A provider failure
+        # can never roll back or invalidate the official inbox copy.
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -404,12 +526,28 @@ def deliver_official_message(
         )
         if not same_payload:
             raise HTTPException(status_code=409, detail="external message ID was already used for different content") from exc
+        _forward_pending_official_copies(
+            db,
+            business=business,
+            agency=agency,
+            message=race,
+            actor_client_id=principal.client_id,
+            config=config,
+        )
         return AgencyOfficialMessageResponse(
             message=OfficialMessageResponse.model_validate(race),
             delivery_status="existing",
         )
 
     stored = db.scalar(_message_query().where(OfficialMessage.id == message.id)) or message
+    _forward_pending_official_copies(
+        db,
+        business=business,
+        agency=agency,
+        message=stored,
+        actor_client_id=principal.client_id,
+        config=config,
+    )
     return AgencyOfficialMessageResponse(
         message=OfficialMessageResponse.model_validate(stored),
         delivery_status="stored",

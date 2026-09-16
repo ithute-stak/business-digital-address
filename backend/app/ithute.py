@@ -22,6 +22,14 @@ class MailboxProvisionResult:
     status: str
 
 
+@dataclass(frozen=True)
+class MailSendResult:
+    delivery_id: str
+    status: str
+    provider_message_id: str | None
+    error: str | None
+
+
 class IthutePlatformClient:
     def __init__(self, settings: Settings, *, timeout_seconds: float = 10.0):
         self.settings = settings
@@ -161,4 +169,48 @@ class IthutePlatformClient:
             mailbox_id=str(data["mailbox_id"]),
             address=str(data["address"]),
             status=str(data["status"]),
+        )
+
+    def send_official_copy(
+        self,
+        *,
+        binding_id: str,
+        external_reference: str,
+        recipient: str,
+        subject: str,
+        text: str,
+    ) -> MailSendResult:
+        """Submit one verified external copy through the product-owned mailbox.
+
+        BDA never receives or handles the mailbox SMTP credential. Ithute derives
+        the sender from the owned binding and makes the external reference
+        idempotent on its side.
+        """
+
+        if not self.settings.enable_real_mail_forwarding:
+            raise IthutePlatformError("real external mail forwarding is disabled")
+        if not binding_id.strip():
+            raise IthutePlatformError("official mailbox binding is not configured")
+
+        token = self._service_token(audience="ithute-mail", scope="mail.send")
+        response = httpx.post(
+            f"{self.settings.ithute_mail_base_url.rstrip('/')}/mailboxes/{quote(binding_id.strip(), safe='')}/send",
+            json={
+                "external_reference": external_reference.strip(),
+                "recipient": recipient.strip().lower(),
+                "subject": subject,
+                "text": text,
+            },
+            headers={"authorization": f"Bearer {token}"},
+            timeout=self.timeout_seconds,
+        )
+        self._raise_for_status(response, "Ithute Mail forwarding submission failed")
+        data = response.json()
+        if not isinstance(data, dict) or not data.get("delivery_id") or not data.get("status"):
+            raise IthutePlatformError("Ithute Mail returned an invalid forwarding response")
+        return MailSendResult(
+            delivery_id=str(data["delivery_id"]),
+            status=str(data["status"]),
+            provider_message_id=str(data["provider_message_id"]) if data.get("provider_message_id") else None,
+            error=str(data["error"]) if data.get("error") else None,
         )
