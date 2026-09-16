@@ -127,6 +127,7 @@ jobs:
           grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' /tmp/bda-production.yml
           grep -Fq 'business-digital-address-web' /tmp/bda-production.yml
           grep -Fq 'public-edge' /tmp/bda-production.yml
+          grep -Fq 'egress:' /tmp/bda-production.yml
           grep -Fq 'internal: true' /tmp/bda-production.yml
           if grep -Eq '^[[:space:]]+ports:' /tmp/bda-production.yml; then
             echo 'Production topology must not publish application/database ports directly.' >&2
