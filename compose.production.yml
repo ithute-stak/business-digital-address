@@ -66,6 +66,7 @@ services:
     networks:
       - database
       - app
+      - egress
 
   frontend:
     image: ${BDA_FRONTEND_IMAGE:-business-digital-address-frontend}:${BDA_IMAGE_TAG:?BDA_IMAGE_TAG is required}
@@ -105,5 +106,6 @@ networks:
     internal: true
   database:
     internal: true
+  egress: {}
   public-edge:
     external: true
