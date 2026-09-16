@@ -19,9 +19,9 @@ ROOT = Path(__file__).parents[1]
 
 def test_official_address_is_stable_and_not_tin_based() -> None:
     assert official_local_part("2026/ABC-001") == "b2026abc001"
-    local, address = official_address_for("2026/ABC-001", "BUSINESS.LS.")
+    local, address = official_address_for("2026/ABC-001", "ITHUTE.CO.LS.")
     assert local == "b2026abc001"
-    assert address == "b2026abc001@business.ls"
+    assert address == "b2026abc001@ithute.co.ls"
 
     long_a = official_local_part("A" * 80)
     long_b = official_local_part("A" * 79 + "B")
@@ -35,14 +35,21 @@ def test_platform_endpoints_match_ithute_contract() -> None:
     assert settings.ithute_invite_url.endswith("/v1/platform/identity-invitations")
     assert settings.ithute_mail_base_url.endswith("/api/v1/platform/mail")
     assert settings.ithute_service_client_id == "business-digital-address"
+    assert settings.portal_base_url == "https://business.ithute.co.ls"
+    assert settings.official_domain == "ithute.co.ls"
 
 
-def test_alembic_revision_is_safe_and_tracks_platform_mail_binding() -> None:
-    source = (ROOT / "alembic" / "versions" / "0001_bda_core.py").read_text(encoding="utf-8")
-    assert 'revision = "0001_bda_core"' in source
+def test_alembic_revisions_are_safe_and_platform_config_is_seeded() -> None:
+    core = (ROOT / "alembic" / "versions" / "0001_bda_core.py").read_text(encoding="utf-8")
+    config = (ROOT / "alembic" / "versions" / "0002_platform_config.py").read_text(encoding="utf-8")
+    assert 'revision = "0001_bda_core"' in core
+    assert 'revision = "0002_platform_config"' in config
     assert len("0001_bda_core") <= 32
-    assert '"platform_binding_id"' in source
-    assert '"platform_mailbox_id"' in source
+    assert len("0002_platform_config") <= 32
+    assert '"platform_binding_id"' in core
+    assert '"platform_mailbox_id"' in core
+    assert 'portal="https://business.ithute.co.ls"' in config
+    assert 'domain="ithute.co.ls"' in config
 
 
 def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
@@ -68,7 +75,7 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
                 {
                     "binding_id": str(uuid.uuid4()),
                     "mailbox_id": str(uuid.uuid4()),
-                    "address": "b123@business.ls",
+                    "address": "b123@ithute.co.ls",
                     "status": "active",
                 },
                 201,
@@ -87,7 +94,7 @@ def test_ithute_client_requests_scoped_managed_tokens(monkeypatch) -> None:
     )
     client.provision_mailbox(
         external_reference="business:1",
-        domain_name="business.ls",
+        domain_name="ithute.co.ls",
         local_part="b123",
         display_name="Example Business",
     )
@@ -117,7 +124,7 @@ def test_first_local_vertical_flow() -> None:
     business = created.json()
     business_id = business["id"]
     assert business["tin"] == tin
-    assert business["official_address"]["address"].endswith("@business.ls")
+    assert business["official_address"]["address"].endswith("@ithute.co.ls")
     assert business["official_address"]["mailbox_status"] == "pending"
 
     external = client.post(
