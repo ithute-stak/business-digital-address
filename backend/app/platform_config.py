@@ -6,7 +6,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import Settings, get_settings
 from .models import PlatformConfiguration
 
 
@@ -47,28 +46,11 @@ def normalize_email_domain(value: str) -> str:
     return raw
 
 
-def get_platform_configuration(db: Session, settings: Settings | None = None) -> PlatformConfiguration:
+def get_platform_configuration(db: Session) -> PlatformConfiguration:
     row = db.scalar(select(PlatformConfiguration).where(PlatformConfiguration.id == 1))
-    if row is not None:
-        return row
-
-    config = settings or get_settings()
-    try:
-        portal = normalize_portal_base_url(
-            config.portal_base_url,
-            production=config.environment.lower() == "production",
+    if row is None:
+        raise HTTPException(
+            status_code=503,
+            detail="platform configuration is not initialized; run database migrations",
         )
-        domain = normalize_email_domain(config.official_domain)
-    except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    row = PlatformConfiguration(
-        id=1,
-        portal_base_url=portal,
-        official_email_domain=domain,
-        updated_by="bootstrap",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
     return row
