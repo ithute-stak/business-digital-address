@@ -14,7 +14,7 @@ The public Caddy proxy reaches only the frontend through the generic `public-edg
 
 `frontend -> backend -> PostgreSQL`
 
-The frontend also connects to `public-edge`. The backend connects to the private app and database networks. PostgreSQL is database-network only. Human access requires Ithute Auth in production; `BDA_DEV_AUTH_BYPASS` is hard-coded off in the production Compose topology.
+The frontend connects to the private app network and to `public-edge`. The backend connects to the private app and database networks plus a dedicated product `egress` network so it can make outbound HTTPS calls to Ithute Auth, identity-invitation and Mail Platform APIs without joining another product's application network. PostgreSQL is database-network only. Human access requires Ithute Auth in production; `BDA_DEV_AUTH_BYPASS` is hard-coded off in the production Compose topology.
 
 ## First deployment prerequisites
 
@@ -26,9 +26,9 @@ The frontend also connects to `public-edge`. The backend connects to the private
 
 ## Deployment behaviour
 
-The deployment workflow is deliberately manual-only for the first production phase. It builds backend and frontend images from the exact `main` commit SHA, transfers those immutable images to the VPS, reuses the persistent PostgreSQL volume, takes a PostgreSQL backup before Alembic migrations, checks backend/frontend health, validates and reloads the product-owned Caddy route, then verifies the public readiness endpoint.
+The deployment workflow is deliberately manual-only for the first production phase. It first requires a successful `Business Digital Address CI` push run for the exact `main` commit SHA being deployed. It then builds backend and frontend images from that SHA, transfers those immutable images to the VPS, reuses the persistent PostgreSQL volume, takes a PostgreSQL backup before Alembic migrations, checks backend/frontend health, validates and reloads the product-owned Caddy route, then verifies the public readiness endpoint.
 
-A deployment refuses to continue if the production environment file is missing, the app directory differs from `/opt/business-digital-address`, production Auth is not required, the development Auth bypass is enabled, or the production Compose file publishes direct host ports.
+A deployment refuses to continue if the exact release has not passed CI, the production environment file is missing, the app directory differs from `/opt/business-digital-address`, production Auth is not required, the development Auth bypass is enabled, or the production Compose file publishes direct host ports.
 
 ## Machine identity and real mail
 
