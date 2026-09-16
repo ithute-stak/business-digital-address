@@ -167,6 +167,8 @@ jobs:
           "${compose[@]}" config > "$rendered"
           grep -Fq 'BDA_AUTH_REQUIRED: "true"' "$rendered" || { echo 'Production Auth must be required.' >&2; exit 1; }
           grep -Fq 'BDA_DEV_AUTH_BYPASS: "false"' "$rendered" || { echo 'Development auth bypass must be disabled.' >&2; exit 1; }
+          grep -Fq 'BDA_PORTAL_BASE_URL: https://business.ithute.co.ls' "$rendered" || { echo 'Unexpected BDA portal bootstrap URL.' >&2; exit 1; }
+          grep -Fq 'BDA_OFFICIAL_DOMAIN: ithute.co.ls' "$rendered" || { echo 'Unexpected BDA official email bootstrap domain.' >&2; exit 1; }
           if grep -Eq '^[[:space:]]+ports:' "$rendered"; then
             echo 'Production topology must not publish application/database ports directly.' >&2
             exit 1
@@ -257,7 +259,7 @@ jobs:
           docker exec "$edge_proxy_id" rm -f "${route}.previous"
 
           echo '[BDA] Verifying public readiness endpoint'
-          curl --retry 20 --retry-delay 3 --retry-all-errors -fsS https://business.ls/api/health/ready >/dev/null
+          curl --retry 20 --retry-delay 3 --retry-all-errors -fsS https://business.ithute.co.ls/api/health/ready >/dev/null
 
           printf '%s\n' "$RELEASE_SHA" > "$APP_DIR/current-release"
           "${compose[@]}" ps
@@ -267,4 +269,4 @@ jobs:
       - name: Deployment summary
         run: |
           echo "Business Digital Address release ${RELEASE_SHA} deployed to /opt/business-digital-address."
-          echo "Public endpoint: https://business.ls"
+          echo "Public endpoint: https://business.ithute.co.ls"
