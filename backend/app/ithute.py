@@ -7,6 +7,7 @@ from urllib.parse import quote
 import httpx
 
 from .config import Settings
+from .services import OFFICIAL_LOCAL_PART_PREFIX
 
 
 class IthutePlatformError(RuntimeError):
@@ -128,13 +129,22 @@ class IthutePlatformClient:
         display_name: str,
         quota_bytes: int = 1024**3,
     ) -> MailboxProvisionResult:
+        # This check lives at the platform-client boundary so explicit/manual API
+        # calls cannot bypass the same kill switch used by automatic provisioning.
+        if not self.settings.enable_real_mail_provisioning:
+            raise IthutePlatformError("real Ithute Mail provisioning is disabled")
+
+        normalized_local_part = local_part.strip().lower()
+        if not normalized_local_part.startswith(OFFICIAL_LOCAL_PART_PREFIX):
+            raise IthutePlatformError("official mailbox is outside the reserved BDA namespace")
+
         token = self._service_token(audience="ithute-mail", scope="mailbox.create")
         response = httpx.post(
             f"{self.settings.ithute_mail_base_url.rstrip('/')}/mailboxes",
             json={
                 "external_reference": external_reference,
                 "domain_name": domain_name,
-                "local_part": local_part,
+                "local_part": normalized_local_part,
                 "display_name": display_name,
                 "quota_bytes": quota_bytes,
             },
