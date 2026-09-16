@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.ithute import MailSendResult
-from app.models import Business, MessageDelivery, OfficialMessage
+from app.models import Business, BusinessMember, MessageDelivery, OfficialMessage
 from app.server import app
 from app.service_security import ManagedServiceVerifier, require_service_scope
 
@@ -153,6 +153,17 @@ def test_external_forwarding_starts_only_after_official_copy_is_committed(monkey
     )
     assert registered.status_code == 201, registered.text
     business_id = uuid.UUID(registered.json()["business"]["id"])
+
+    # The Trade integration intentionally creates a pending owner invitation, not
+    # an already-active portal membership. Activate that exact membership for the
+    # development principal so the user-facing verified-email flow can be exercised
+    # without weakening the production ownership boundary.
+    with SessionLocal() as db:
+        member = db.scalar(select(BusinessMember).where(BusinessMember.business_id == business_id))
+        assert member is not None
+        member.auth_user_sub = "development-user"
+        member.status = "active"
+        db.commit()
 
     external = client.post(
         f"/api/v1/businesses/{business_id}/external-emails",
