@@ -1,4 +1,4 @@
-business.ls {
+business.ithute.co.ls {
     encode zstd gzip
 
     header {
