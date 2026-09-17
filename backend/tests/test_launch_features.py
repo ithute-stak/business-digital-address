@@ -114,9 +114,12 @@ def test_launch_inbox_search_archive_and_delivery_retry_guards() -> None:
 
     archive_view = client.get(f"/api/v1/businesses/{business_id}/inbox?archived=true")
     assert archive_view.status_code == 200, archive_view.text
-    assert archive_view.json()["total"] == 1
+    archive_payload = archive_view.json()
+    assert archive_payload["total"] == 1
 
-    official_delivery = next(row for row in message["deliveries"] if row["channel"] == "official_inbox")
+    official_delivery = next(
+        row for row in archive_payload["items"][0]["deliveries"] if row["channel"] == "official_inbox"
+    )
     retry = client.post(
         f"/api/v1/businesses/{business_id}/messages/{message_id}/deliveries/{official_delivery['id']}/retry"
     )
