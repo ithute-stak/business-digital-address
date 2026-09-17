@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -131,6 +131,9 @@ class OfficialMessage(Base):
     business: Mapped[Business] = relationship(back_populates="messages")
     agency: Mapped[Agency] = relationship(back_populates="messages")
     deliveries: Mapped[list[MessageDelivery]] = relationship(back_populates="message", cascade="all, delete-orphan")
+    attachments: Mapped[list[MessageAttachment]] = relationship(back_populates="message", cascade="all, delete-orphan")
+    acknowledgements: Mapped[list[MessageAcknowledgement]] = relationship(back_populates="message", cascade="all, delete-orphan")
+    user_states: Mapped[list[MessageUserState]] = relationship(back_populates="message", cascade="all, delete-orphan")
 
 
 class MessageDelivery(Base):
@@ -147,6 +150,57 @@ class MessageDelivery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     message: Mapped[OfficialMessage] = relationship(back_populates="deliveries")
+
+
+class MessageAttachment(Base):
+    __tablename__ = "message_attachments"
+    __table_args__ = (
+        UniqueConstraint("message_id", "sha256_hex", name="uq_message_attachment_hash"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("official_messages.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(240))
+    content_type: Mapped[str] = mapped_column(String(160))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    sha256_hex: Mapped[str] = mapped_column(String(64), index=True)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    message: Mapped[OfficialMessage] = relationship(back_populates="attachments")
+
+
+class MessageAcknowledgement(Base):
+    __tablename__ = "message_acknowledgements"
+    __table_args__ = (
+        UniqueConstraint("message_id", "member_id", name="uq_message_member_ack"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("official_messages.id", ondelete="CASCADE"), index=True)
+    member_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("business_members.id", ondelete="CASCADE"), index=True)
+    actor_sub: Mapped[str] = mapped_column(String(64), index=True)
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    message: Mapped[OfficialMessage] = relationship(back_populates="acknowledgements")
+
+
+class MessageUserState(Base):
+    __tablename__ = "message_user_states"
+    __table_args__ = (
+        UniqueConstraint("message_id", "auth_user_sub", name="uq_message_user_state"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("official_messages.id", ondelete="CASCADE"), index=True)
+    auth_user_sub: Mapped[str] = mapped_column(String(64), index=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    message: Mapped[OfficialMessage] = relationship(back_populates="user_states")
 
 
 class AuditEvent(Base):
