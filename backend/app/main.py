@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from .config import Settings, get_settings
 from .db import get_db
 from .ithute import IthutePlatformClient, IthutePlatformError
+from .mail_forwarding import send_verification_email, sync_inbound_forwarding
 from .models import (
     Agency,
     Business,
@@ -241,8 +242,6 @@ def create_business(payload: BusinessCreate, db: Db, principal: Principal) -> Bu
         try:
             _provision_official_mailbox(db, business)
         except HTTPException:
-            # Business registration remains valid even when mailbox provisioning
-            # is temporarily unavailable; retry through the dedicated endpoint.
             pass
     return db.scalar(_business_query().where(Business.id == business.id)) or business
 
@@ -289,13 +288,8 @@ def provision_official_address(business_id: uuid.UUID, db: Db, principal: Princi
 
 @app.post("/api/v1/businesses/{business_id}/external-emails", response_model=ExternalEmailResponse, status_code=201)
 def add_external_email(payload: ExternalEmailCreate, business_id: uuid.UUID, db: Db, principal: Principal) -> ExternalEmailResponse:
-    _business_for_user(db, business_id, principal)
+    business = _business_for_user(db, business_id, principal)
     config = get_settings()
-    if config.environment.lower() == "production":
-        raise HTTPException(
-            status_code=503,
-            detail="external email verification delivery is not activated yet; official mailbox operation is unaffected",
-        )
     code, digest, expires_at = create_verification_code(ttl_minutes=config.external_email_verification_ttl_minutes)
     item = ExternalEmail(
         business_id=business_id,
@@ -319,13 +313,29 @@ def add_external_email(payload: ExternalEmailCreate, business_id: uuid.UUID, db:
         db.rollback()
         raise HTTPException(status_code=409, detail="external email is already registered for this business") from exc
     db.refresh(item)
+
+    if config.environment.lower() == "production":
+        try:
+            send_verification_email(db, business, item, code)
+        except IthutePlatformError as exc:
+            create_business_audit(
+                db,
+                business_id=business_id,
+                action="external_email.verification.delivery_failed",
+                actor_id=config.ithute_service_client_id,
+                actor_type="service",
+                details={"email": item.email, "error": str(exc)},
+            )
+            db.commit()
+            raise HTTPException(status_code=502, detail="verification email could not be delivered") from exc
+
     return ExternalEmailResponse(
         id=item.id,
         email=item.email,
         status=item.status,
         forward_official_mail=item.forward_official_mail,
         verified_at=item.verified_at,
-        verification_code=code,
+        verification_code=code if config.environment.lower() != "production" else None,
     )
 
 
@@ -337,7 +347,7 @@ def verify_external_email(
     db: Db,
     principal: Principal,
 ) -> ExternalEmail:
-    _business_for_user(db, business_id, principal)
+    business = _business_for_user(db, business_id, principal)
     item = db.get(ExternalEmail, email_id)
     if item is None or item.business_id != business_id:
         raise HTTPException(status_code=404, detail="external email not found")
@@ -358,6 +368,27 @@ def verify_external_email(
     )
     db.commit()
     db.refresh(item)
+
+    if item.forward_official_mail:
+        try:
+            sync_inbound_forwarding(
+                db,
+                business,
+                actor_id=get_settings().ithute_service_client_id,
+                strict=get_settings().environment.lower() == "production",
+            )
+        except IthutePlatformError as exc:
+            create_business_audit(
+                db,
+                business_id=business_id,
+                action="external_email.forwarding.sync_failed",
+                actor_id=get_settings().ithute_service_client_id,
+                actor_type="service",
+                details={"email": item.email, "error": str(exc)},
+            )
+            db.commit()
+            if get_settings().environment.lower() == "production":
+                raise HTTPException(status_code=502, detail="email verified but inbound forwarding could not be activated") from exc
     return item
 
 
