@@ -3,6 +3,7 @@ from .integration_api import router as integration_router
 from .launch_features import router as launch_features_router
 from .main import app
 from .membership_api import router as membership_router
+from .official_message_attachments import router as official_message_attachments_router
 from .platform_config_api import router as platform_config_router
 from .portal_api import router as portal_router
 
@@ -26,4 +27,5 @@ app.include_router(platform_config_router)
 app.include_router(membership_router)
 app.include_router(portal_router)
 app.include_router(integration_router)
+app.include_router(official_message_attachments_router)
 app.include_router(launch_features_router)
