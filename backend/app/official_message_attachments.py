@@ -30,6 +30,7 @@ _ALLOWED = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 
+
 class AgencyMessageAttachmentsRequest(BaseModel):
     tin: str = Field(min_length=1, max_length=80)
     external_message_id: str = Field(min_length=1, max_length=160)
@@ -37,6 +38,7 @@ class AgencyMessageAttachmentsRequest(BaseModel):
     body_text: str = Field(min_length=1, max_length=100000)
     classification: str = Field(default="official", min_length=1, max_length=32)
     attachments: list[AttachmentCreate] = Field(min_length=1, max_length=10)
+
 
 class AgencyMessageAttachmentsResponse(BaseModel):
     message: OfficialMessageResponse
@@ -70,13 +72,27 @@ def _decode(items: list[AttachmentCreate]) -> list[tuple[str, str, bytes, str]]:
 
 
 def _query():
-    return select(OfficialMessage).options(selectinload(OfficialMessage.deliveries), selectinload(OfficialMessage.attachments))
+    return select(OfficialMessage).options(
+        selectinload(OfficialMessage.deliveries),
+        selectinload(OfficialMessage.attachments),
+    )
 
 
-def _forward(db: Session, business: Business, message: OfficialMessage, agency_name: str, actor: str, config: Settings) -> None:
+def _forward(
+    db: Session,
+    business: Business,
+    message: OfficialMessage,
+    agency_name: str,
+    actor: str,
+    config: Settings,
+) -> None:
     if not config.enable_real_mail_forwarding:
         return
-    pending = [d for d in message.deliveries if d.channel == "external_forward" and d.status == "pending_provider"]
+    pending = [
+        delivery
+        for delivery in message.deliveries
+        if delivery.channel == "external_forward" and delivery.status in {"pending_provider", "failed"}
+    ]
     if not pending:
         return
     official = business.official_address
@@ -93,11 +109,17 @@ def _forward(db: Session, business: Business, message: OfficialMessage, agency_n
     )
     client = IthutePlatformClient(config)
     for delivery in pending:
+        delivery.status = "pending_provider"
+        delivery.last_error = None
         try:
             result = send_official_copy_with_attachments(
-                client, binding_id=official.platform_binding_id,
-                external_reference=f"message-delivery:{delivery.id}", recipient=delivery.target,
-                subject=message.subject, text=text, attachments=list(message.attachments),
+                client,
+                binding_id=official.platform_binding_id,
+                external_reference=f"message-delivery:{delivery.id}",
+                recipient=delivery.target,
+                subject=message.subject,
+                text=text,
+                attachments=list(message.attachments),
             )
         except IthutePlatformError as exc:
             delivery.last_error = str(exc)[:255]
@@ -107,42 +129,127 @@ def _forward(db: Session, business: Business, message: OfficialMessage, agency_n
         if result.status == "failed":
             delivery.status = "failed"
         elif result.status == "delivered":
-            delivery.status = "delivered"; delivery.delivered_at = utcnow()
+            delivery.status = "delivered"
+            delivery.delivered_at = utcnow()
         elif result.status == "queued":
             delivery.status = "submitted"
         else:
             delivery.status = "pending_provider"
-    create_business_audit(db, business_id=business.id, action="official_message.attachments.forwarded", actor_id=actor, actor_type="service", details={"message_id": str(message.id), "attachment_count": len(message.attachments)})
+    create_business_audit(
+        db,
+        business_id=business.id,
+        action="official_message.attachments.forwarded",
+        actor_id=actor,
+        actor_type="service",
+        details={"message_id": str(message.id), "attachment_count": len(message.attachments)},
+    )
     db.commit()
 
 
-@router.post("/agencies/messages-with-attachments", response_model=AgencyMessageAttachmentsResponse, status_code=201)
-def deliver_message_with_attachments(payload: AgencyMessageAttachmentsRequest, db: Db, principal: MessagePrincipal, config: Settings = Depends(get_settings)) -> AgencyMessageAttachmentsResponse:
+@router.post(
+    "/agencies/messages-with-attachments",
+    response_model=AgencyMessageAttachmentsResponse,
+    status_code=201,
+)
+def deliver_message_with_attachments(
+    payload: AgencyMessageAttachmentsRequest,
+    db: Db,
+    principal: MessagePrincipal,
+    config: Settings = Depends(get_settings),
+) -> AgencyMessageAttachmentsResponse:
     agency = _agency_for_service(db, principal, config)
     business = db.scalar(_business_query().where(Business.tin == normalize_identifier(payload.tin)))
     if business is None or business.official_address is None:
         raise HTTPException(status_code=404, detail="business/TIN not found")
     decoded = _decode(payload.attachments)
-    existing = db.scalar(_query().where(OfficialMessage.agency_id == agency.id, OfficialMessage.external_message_id == payload.external_message_id))
-    manifest = sorted((a, b, len(c), d) for a, b, c, d in decoded)
+    existing = db.scalar(
+        _query().where(
+            OfficialMessage.agency_id == agency.id,
+            OfficialMessage.external_message_id == payload.external_message_id,
+        )
+    )
+    manifest = sorted((filename, content_type, len(content), digest) for filename, content_type, content, digest in decoded)
     if existing is not None:
-        existing_manifest = sorted((a.filename, a.content_type, a.size_bytes, a.sha256_hex) for a in existing.attachments)
-        same = existing.business_id == business.id and existing.subject == payload.subject and existing.body_text == payload.body_text and existing.classification == payload.classification and existing_manifest == manifest
+        existing_manifest = sorted(
+            (item.filename, item.content_type, item.size_bytes, item.sha256_hex)
+            for item in existing.attachments
+        )
+        same = (
+            existing.business_id == business.id
+            and existing.subject == payload.subject
+            and existing.body_text == payload.body_text
+            and existing.classification == payload.classification
+            and existing_manifest == manifest
+        )
         if not same:
             raise HTTPException(status_code=409, detail="external message ID was already used for different content")
         _forward(db, business, existing, agency.name, principal.client_id, config)
-        return AgencyMessageAttachmentsResponse(message=OfficialMessageResponse.model_validate(existing), delivery_status="existing", attachment_count=len(existing.attachments))
+        return AgencyMessageAttachmentsResponse(
+            message=OfficialMessageResponse.model_validate(existing),
+            delivery_status="existing",
+            attachment_count=len(existing.attachments),
+        )
 
-    message = OfficialMessage(business_id=business.id, agency_id=agency.id, external_message_id=payload.external_message_id, subject=payload.subject, body_text=payload.body_text, classification=payload.classification, status="stored")
-    db.add(message); db.flush()
+    message = OfficialMessage(
+        business_id=business.id,
+        agency_id=agency.id,
+        external_message_id=payload.external_message_id,
+        subject=payload.subject,
+        body_text=payload.body_text,
+        classification=payload.classification,
+        status="stored",
+    )
+    db.add(message)
+    db.flush()
     for filename, content_type, content, digest in decoded:
-        db.add(MessageAttachment(message_id=message.id, filename=filename, content_type=content_type, size_bytes=len(content), sha256_hex=digest, content=content))
-    db.add(MessageDelivery(message_id=message.id, channel="official_inbox", target=business.official_address.address, status="delivered", delivered_at=utcnow()))
+        db.add(
+            MessageAttachment(
+                message_id=message.id,
+                filename=filename,
+                content_type=content_type,
+                size_bytes=len(content),
+                sha256_hex=digest,
+                content=content,
+            )
+        )
+    db.add(
+        MessageDelivery(
+            message_id=message.id,
+            channel="official_inbox",
+            target=business.official_address.address,
+            status="delivered",
+            delivered_at=utcnow(),
+        )
+    )
     for external in business.external_emails:
         if external.status == "verified" and external.forward_official_mail:
-            db.add(MessageDelivery(message_id=message.id, channel="external_forward", target=external.email, status="pending_provider"))
-    create_business_audit(db, business_id=business.id, action="official_message.stored", actor_id=principal.client_id, actor_type="service", details={"agency": agency.code, "external_message_id": payload.external_message_id, "attachment_count": len(decoded), "attachment_sha256": [d for _, _, _, d in decoded]})
+            db.add(
+                MessageDelivery(
+                    message_id=message.id,
+                    channel="external_forward",
+                    target=external.email,
+                    status="pending_provider",
+                )
+            )
+    create_business_audit(
+        db,
+        business_id=business.id,
+        action="official_message.stored",
+        actor_id=principal.client_id,
+        actor_type="service",
+        details={
+            "agency": agency.code,
+            "external_message_id": payload.external_message_id,
+            "attachment_count": len(decoded),
+            "attachment_sha256": [digest for _, _, _, digest in decoded],
+        },
+    )
+    # Retain the official message and all attachments before touching external mail.
     db.commit()
     stored = db.scalar(_query().where(OfficialMessage.id == message.id)) or message
     _forward(db, business, stored, agency.name, principal.client_id, config)
-    return AgencyMessageAttachmentsResponse(message=OfficialMessageResponse.model_validate(stored), delivery_status="stored", attachment_count=len(stored.attachments))
+    return AgencyMessageAttachmentsResponse(
+        message=OfficialMessageResponse.model_validate(stored),
+        delivery_status="stored",
+        attachment_count=len(stored.attachments),
+    )
