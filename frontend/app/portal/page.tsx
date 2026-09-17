@@ -17,5 +17,28 @@ export default async function PortalPage() {
   if (!config.devAuthBypass && !hasSession) {
     redirect("/api/auth/login?return_to=/portal");
   }
-  return <PortalClient />;
+  return (
+    <>
+      <a
+        href="/portal/correspondence"
+        style={{
+          position: "fixed",
+          right: 24,
+          bottom: 24,
+          zIndex: 50,
+          borderRadius: 999,
+          padding: "12px 18px",
+          background: "#ffffff",
+          color: "#111827",
+          border: "1px solid #d1d5db",
+          boxShadow: "0 8px 24px rgba(0,0,0,.12)",
+          fontWeight: 700,
+          textDecoration: "none",
+        }}
+      >
+        Open Correspondence Centre →
+      </a>
+      <PortalClient />
+    </>
+  );
 }
