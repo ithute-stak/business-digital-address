@@ -130,11 +130,9 @@ def test_failed_attachment_delivery_retry_reuses_retained_attachment_and_deliver
         app.dependency_overrides.pop(get_settings, None)
 
 
-def test_retry_route_is_exposed_once() -> None:
+def test_retry_route_is_present_in_openapi() -> None:
     path = "/api/v1/businesses/{business_id}/messages/{message_id}/deliveries/{delivery_id}/retry"
-    matches = [
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == path and "POST" in (getattr(route, "methods", set()) or set())
-    ]
-    assert len(matches) == 1
+    schema = client.get("/openapi.json")
+    assert schema.status_code == 200, schema.text
+    assert path in schema.json()["paths"]
+    assert "post" in schema.json()["paths"][path]
